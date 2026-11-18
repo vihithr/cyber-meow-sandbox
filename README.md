@@ -5,6 +5,10 @@
   <i>零外部资源依赖 · 60FPS 丝滑交互 · 丰富行为树 AI · 纯程序化声音合成</i>
 </p>
 
+<p align="center">
+  👉 <b><a href="https://vihithr.github.io/cyber-meow-sandbox/">🌐 点击直接在线游玩 (GitHub Pages 在线试玩)</a></b> 👈
+</p>
+
 ---
 
 ## 🌟 核心特色与功能
