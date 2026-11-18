@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>CyberMeow 🐾 赛博猫咪物理游乐场</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
+  <meta name="description" content="CyberMeow: 零外部依赖的纯原生 HTML5 Canvas + Web Audio API 赛博猫咪物理游乐场！">
+  <meta property="og:title" content="CyberMeow 🐾 赛博猫咪物理游乐场">
+  <meta property="og:description" content="零外部资源依赖 · 60FPS 丝滑交互 · 丰富行为树 AI · 纯程序化声音合成">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- 顶部 HUD 状态卡片与系统工具栏 -->
+  <div id="top-bar">
+    <div class="hud-group">
+      <div class="glass-card title-badge">
+        <h1>🐾 CyberMeow</h1>
+        <div class="stats-bar">
+          <span>猫咪: <b id="stat-cats">0</b> 只</span>
+          <span>玩具/家具: <b id="stat-toys">0</b> 个</span>
+          <span>幸福度: <b id="stat-mood">100%</b></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="hud-group">
+      <div class="glass-card" style="padding: 6px 12px; gap: 8px;">
+        <button class="pill-btn" id="btn-sound" title="音效开关">🔊 声音: 开</button>
+        <button class="pill-btn" id="btn-bgm" title="程序化生成极简 Lofi 氛围音乐">🎵 音乐: 关</button>
+        <button class="pill-btn" id="btn-weather" title="切换天气">☀️ 晴空</button>
+        <button class="pill-btn" id="btn-theme" title="切换场景主题风格">🌙 温馨夜</button>
+        <button class="pill-btn" id="btn-challenge" title="开启 45 秒红点挑战小游戏" style="color: #ff6b81;">🎯 挑战</button>
+        <button class="pill-btn" id="btn-photo" title="拍摄拍立得可爱纪念快照 (P)">📸 快照</button>
+        <button class="pill-btn" id="btn-clear" title="清空所有散落玩具">🧹 清理</button>
+        <a href="https://github.com/vihithr/cyber-meow-sandbox" target="_blank" class="pill-btn" style="text-decoration: none;" title="查看 GitHub 仓库源码">⭐ GitHub</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 红点追逐限时挑战 HUD -->
+  <div id="challenge-hud">
+    <span>⏱️ 剩余时间: <b id="challenge-time">45s</b></span>
+    <span>🏆 当前得分: <b id="challenge-score">0</b></span>
+  </div>
+
+  <!-- 浮动操作提示 Toast -->
+  <div class="hint-toast" id="hint-text">💡 正在初始化赛博猫咪世界...</div>
+
+  <!-- 底部多功能互动玩具与家具 Dock 栏 -->
+  <div id="dock-container">
+    <button class="dock-item active" data-tool="pet" title="快捷键: 1">👆 抚摸/抓起</button>
+    <button class="dock-item" data-tool="cat" title="快捷键: 2">🐱 召唤猫咪</button>
+    <button class="dock-item" data-tool="laser" title="快捷键: 3">🔴 激光红点</button>
+    <button class="dock-item" data-tool="feather" title="快捷键: 4">🪶 逗猫棒</button>
+    <button class="dock-item" data-tool="fish" title="快捷键: 5">🐟 投喂鱼干</button>
+    <button class="dock-item" data-tool="yarn" title="快捷键: 6">🧶 扔毛线球</button>
+    <button class="dock-item" data-tool="box" title="快捷键: 7">📦 放置纸箱</button>
+    <button class="dock-item" data-tool="cattree" title="快捷键: 8">🌳 豪华猫爬架</button>
+    <button class="dock-item" data-tool="roomba" title="快捷键: 9">🤖 扫地机</button>
+    <button class="dock-item" data-tool="scratcher">🪵 瓦楞抓板</button>
+    <button class="dock-item" data-tool="catnip" title="快捷键: 0">🌿 猫薄荷喷雾</button>
+    <button class="dock-item" id="btn-antigravity" title="快捷键: 空格键">🛸 反重力模式</button>
+  </div>
+
+  <!-- 主物理游戏画布 -->
+  <div id="canvas-container">
+    <canvas id="playground"></canvas>
+  </div>
+
+  <!-- 猫咪身份证模态卡片 (Cat Passport Modal) -->
+  <div class="modal-overlay" id="passport-modal">
+    <div class="passport-card">
+      <div class="passport-header">
+        <h3>🐾 猫咪身份证 (Passport)</h3>
+        <button class="btn-close" id="btn-close-passport">&times;</button>
+      </div>
+      <div class="passport-body">
+        <div class="avatar-row">
+          <canvas id="passport-avatar-canvas" width="76" height="76"></canvas>
+          <div class="name-edit-box">
+            <input type="text" id="cat-name-input" class="name-input" maxlength="10" placeholder="点击修改名字">
+            <span class="badge-tag" id="cat-breed-tag">品种</span>
+          </div>
+        </div>
+
+        <div style="background: rgba(255, 255, 255, 0.04); padding: 10px 14px; border-radius: 10px;">
+          <div style="font-size: 0.85rem; font-weight: 700; color: #feca57;" id="cat-personality-title">性格</div>
+          <div style="font-size: 0.8rem; color: #a4b0be; margin-top: 4px;" id="cat-personality-desc">性格说明</div>
+        </div>
+
+        <div class="stat-metric">
+          <div class="stat-metric-label"><span>饱腹度 (吃小鱼干增加)</span></div>
+          <div class="progress-track"><div class="progress-fill fill-hunger" id="bar-hunger"></div></div>
+        </div>
+
+        <div class="stat-metric">
+          <div class="stat-metric-label"><span>亲密度 (抚摸与陪伴增加)</span></div>
+          <div class="progress-track"><div class="progress-fill fill-affection" id="bar-affection"></div></div>
+        </div>
+
+        <div class="stat-metric">
+          <div class="stat-metric-label"><span>精力活力 (阳光与打盹恢复)</span></div>
+          <div class="progress-track"><div class="progress-fill fill-energy" id="bar-energy"></div></div>
+        </div>
+
+        <div style="margin-top: 6px;">
+          <div style="font-size: 0.8rem; color: #dfe4ea; margin-bottom: 6px;">🎩 专属服饰搭配:</div>
+          <div class="hat-picker" id="hat-picker-opts"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 拍立得快照下载模态 (Photo Snapshot Modal) -->
+  <div class="modal-overlay" id="snapshot-modal">
+    <div class="snapshot-polaroid">
+      <img id="snapshot-img" alt="CyberMeow 快照">
+      <div class="polaroid-caption">🐾 Captured in CyberMeow Playground 💖</div>
+      <div class="snapshot-actions">
+        <button class="pill-btn active" id="btn-download-snap">💾 下载相片 (PNG)</button>
+        <button class="pill-btn" id="btn-close-snapshot">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 纯原生 JS 模块 (零外部依赖，支持直接 double-click 本地打开) -->
+  <script src="js/physics.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/furniture.js"></script>
+  <script src="js/toys.js"></script>
+  <script src="js/cat.js"></script>
+  <script src="js/environment.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
