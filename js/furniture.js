@@ -479,6 +479,140 @@
     }
   }
 
+  // 7. 智能自动投喂机 (SmartFeeder) - 全自动奢宠供粮，解决铲屎官喂食烦恼
+  class SmartFeeder {
+    constructor(x, y) {
+      this.type = 'feeder';
+      this.x = x;
+      this.y = y;
+      this.w = 54;
+      this.h = 65;
+      this.autoTimer = 180;
+      this.dispenseAnim = 0;
+      this.foodBowlLevel = 3;
+    }
+
+    dispense(sceneContext) {
+      this.dispenseAnim = 30;
+      this.foodBowlLevel = Math.min(6, this.foodBowlLevel + 2);
+      if (window.CyberMeow.soundEngine) {
+        window.CyberMeow.soundEngine.playCrunch();
+      }
+      if (sceneContext && sceneContext.toys) {
+        const FishTreatClass = window.CyberMeow.FishTreat;
+        const fish = new FishTreatClass(this.x + 16, this.y - 12);
+        fish.vx = 2.2 + Math.random() * 1.5;
+        fish.vy = -3.2;
+        sceneContext.toys.push(fish);
+        if (sceneContext.spawnParticle) {
+          sceneContext.spawnParticle(this.x, this.y - 45, '🥣✨');
+        }
+      }
+    }
+
+    update(width, height, sceneContext) {
+      if (this.dispenseAnim > 0) this.dispenseAnim--;
+
+      this.autoTimer--;
+      // 自动投喂：每隔一段时间或有猫咪想吃点心
+      let catNeedsSnack = false;
+      if (sceneContext && sceneContext.cats) {
+        for (let c of sceneContext.cats) {
+          if (c.hunger < 65 && Math.hypot(c.x - this.x, c.y - this.y) < 450) {
+            catNeedsSnack = true;
+            break;
+          }
+        }
+      }
+
+      if (this.autoTimer <= 0 || (catNeedsSnack && this.autoTimer < 100)) {
+        this.dispense(sceneContext);
+        this.autoTimer = 550 + Math.random() * 250;
+      }
+    }
+
+    draw(ctx) {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+
+      // 阴影
+      ctx.beginPath();
+      ctx.ellipse(0, 4, 30, 7, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.2)';
+      ctx.fill();
+
+      // 底座食盆
+      ctx.fillStyle = '#dfe4ea';
+      ctx.beginPath();
+      ctx.roundRect(-24, -12, 48, 15, [5]);
+      ctx.fill();
+      ctx.strokeStyle = '#a4b0be';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // 食盆内部
+      ctx.fillStyle = '#747d8c';
+      ctx.beginPath();
+      ctx.ellipse(12, -4, 11, 4.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 碗里的猫粮小鱼干
+      if (this.foodBowlLevel > 0) {
+        ctx.fillStyle = '#e67e22';
+        for (let i = 0; i < Math.min(4, this.foodBowlLevel); i++) {
+          ctx.beginPath();
+          ctx.arc(8 + i * 2.5, -5, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // 白色主机身
+      ctx.fillStyle = '#f1f2f6';
+      ctx.beginPath();
+      ctx.roundRect(-20, -this.h, 40, this.h - 10, [7]);
+      ctx.fill();
+      ctx.strokeStyle = '#ced6e0';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // 半透明可视储粮仓
+      ctx.fillStyle = 'rgba(116, 185, 255, 0.35)';
+      ctx.beginPath();
+      ctx.roundRect(-15, -this.h + 8, 30, 26, [4]);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(9, 132, 227, 0.4)';
+      ctx.stroke();
+
+      // 粮仓里金黄的粮食粒
+      ctx.fillStyle = '#f39c12';
+      for (let rx = -10; rx <= 10; rx += 6) {
+        for (let ry = -this.h + 13; ry <= -this.h + 28; ry += 6) {
+          ctx.beginPath();
+          ctx.arc(rx, ry, 1.8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // 呼吸指示灯
+      const isDispensing = this.dispenseAnim > 0;
+      ctx.fillStyle = isDispensing ? '#2ed573' : '#10ac84';
+      ctx.shadowColor = '#2ed573';
+      ctx.shadowBlur = isDispensing ? 10 : 3;
+      ctx.beginPath();
+      ctx.arc(0, -this.h + 40, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // 机器品牌 LOGO
+      ctx.fillStyle = '#747d8c';
+      ctx.font = 'bold 7px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('AUTO FEED', 0, -15);
+
+      ctx.restore();
+    }
+  }
+
   window.CyberMeow = window.CyberMeow || {};
   window.CyberMeow.WallPerch = WallPerch;
   window.CyberMeow.WindowSill = WindowSill;
@@ -486,4 +620,5 @@
   window.CyberMeow.CatTree = CatTree;
   window.CyberMeow.Scratcher = Scratcher;
   window.CyberMeow.Sunbeam = Sunbeam;
+  window.CyberMeow.SmartFeeder = SmartFeeder;
 })(window);

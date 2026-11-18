@@ -163,4 +163,12 @@ mockScene.toys = [new YarnBall(520, 400)];
 const swatResult = testCat.checkHighPerchSwat(mockScene);
 console.log(`✅ [高台贱爪推物测试通过] 推物判定触发: ${swatResult}`);
 
+// 6. 测试智能自动投喂机 (SmartFeeder) 出粮
+const feeder = new (mockWindow.CyberMeow.SmartFeeder)(600, 500);
+const prevToyCount = mockScene.toys.length;
+feeder.dispense(mockScene);
+if (mockScene.toys.length > prevToyCount) {
+  console.log(`✅ [智能自动投喂机测试通过] 成功出粮，生成香脆小鱼干！`);
+}
+
 console.log('\n🎉 所有核心模块与深度交叉逻辑测试均成功通过！');

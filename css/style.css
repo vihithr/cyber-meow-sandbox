@@ -116,6 +116,13 @@ body {
   box-shadow: 0 4px 16px rgba(255, 117, 140, 0.45);
 }
 
+.nav-zone-btn.active {
+  background: linear-gradient(135deg, #ff758c 0%, #ff7eb3 100%) !important;
+  border-color: #ffa1b2 !important;
+  color: #fff !important;
+  box-shadow: 0 0 12px rgba(255, 117, 140, 0.45) !important;
+}
+
 .icon-btn.special-on {
   background: linear-gradient(135deg, #0984e3 0%, #74b9ff 100%);
   box-shadow: 0 4px 16px rgba(9, 132, 227, 0.5);

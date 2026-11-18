@@ -155,8 +155,8 @@
     update(width, height, sceneContext) {
       const gravity = physicsWorld.getGravity();
 
-      // 1. 生理驱动自然代谢消耗
-      this.hunger = Math.max(0, this.hunger - 0.007);
+      // 1. 生理驱动自然代谢消耗 (无压力健康食欲模型)
+      this.hunger = Math.max(0, this.hunger - 0.0018);
       if (this.state === 'sleeping' || this.state === 'loaf') {
         this.energy = Math.min(100, this.energy + 0.035);
         this.boredom = Math.max(0, this.boredom - 0.02);
@@ -177,14 +177,26 @@
         if (this.purrLevel <= 0) soundEngine.stopPurr();
       }
 
-      // 2. 长条液体猫抓取状态 (Scruff Grab)
+      // 2. 长条液体猫抓取状态 (Scruff Grab - 解除一切依附并确保随时可松开)
       if (this.isGrabbed) {
         this.state = 'grabbed';
+        if (this.ridingObj) {
+          if (this.ridingObj.rider === this) this.ridingObj.rider = null;
+          this.ridingObj = null;
+        }
+        if (this.inBox) {
+          if (this.inBox.occupant === this) this.inBox.occupant = null;
+          this.inBox = null;
+        }
+        this.perchedTier = null;
         this.grabStretch = MathUtils.lerp(this.grabStretch, 1.55, 0.12);
         this.tailChain.update(this.x, this.y + this.radius * 1.4, 0.35, 0.85);
         return;
       } else {
         this.grabStretch = MathUtils.lerp(this.grabStretch, 1.0, 0.18);
+        if (this.state === 'grabbed') {
+          this.state = 'idle';
+        }
       }
 
       // 3. 靠近人手时的蹭脸与踩奶

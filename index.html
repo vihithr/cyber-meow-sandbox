@@ -25,6 +25,17 @@
       </div>
     </div>
 
+    <!-- 超宽豪宅区域导航与全景缩放切换 -->
+    <div class="hud-group" id="manor-nav-group">
+      <div class="glass-card" style="padding: 5px 12px; gap: 8px;">
+        <span style="font-size: 0.78rem; color: #a4b0be; font-weight: bold;">🏰 豪宅分区:</span>
+        <button class="pill-btn nav-zone-btn active" data-zone="patio" title="平移镜头至阳光露台">☀️ 阳光露台</button>
+        <button class="pill-btn nav-zone-btn" data-zone="living" title="平移镜头至中央大客厅 (带自动投喂机)">🛋️ 豪华客厅</button>
+        <button class="pill-btn nav-zone-btn" data-zone="playground" title="平移镜头至猫咪游乐高塔与爬架">🎪 游乐高塔</button>
+        <button class="pill-btn" id="btn-zoom-toggle" title="切换全景俯瞰(0.65x)与常规视角(1.0x)" style="color: #feca57; font-weight: bold;">🔍 切换全景</button>
+      </div>
+    </div>
+
     <div class="hud-group">
       <div class="glass-card" style="padding: 6px 12px; gap: 8px;">
         <button class="pill-btn" id="btn-sound" title="音效开关">🔊 声音: 开</button>
@@ -46,7 +57,7 @@
   </div>
 
   <!-- 浮动操作提示 Toast -->
-  <div class="hint-toast" id="hint-text">💡 正在初始化赛博猫咪世界...</div>
+  <div class="hint-toast" id="hint-text">💡 提示：按住鼠标右键可左右拖拽平移 3200px 豪宅！双击猫咪可抱入怀中特写侍奉~</div>
 
   <!-- 底部多功能互动玩具与家具 Dock 抽屉 (支持一键折叠，安全避开猫咪) -->
   <div id="dock-wrapper">
