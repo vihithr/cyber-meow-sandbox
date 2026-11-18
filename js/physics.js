@@ -117,6 +117,11 @@
       return this.gravityValues[this.gravityMode] || 0.28;
     }
 
+    getFloorY(height) {
+      // 底部留出 130px 物理安全区，与 Dock 彻底隔离，确保玩家能轻松点击、抚摸地面的猫咪
+      return height - 130;
+    }
+
     isZeroG() {
       return this.gravityMode === 'antigravity';
     }

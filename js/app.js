@@ -19,6 +19,8 @@
     CatTree,
     Scratcher,
     Sunbeam,
+    WallPerch,
+    WindowSill,
     BREEDS,
     PERSONALITIES
   } = window.CyberMeow;
@@ -80,17 +82,25 @@
     }
 
     initDefaultScene() {
-      // 默认生成 3 只可爱猫咪、1个猫爬架、1个扫地机、1个毛线球
-      this.cats.push(new Cat(this.width * 0.3, this.height - 70, { breed: BREEDS[0], name: '大橘' }));
-      this.cats.push(new Cat(this.width * 0.5, this.height - 70, { breed: BREEDS[1], name: '奥利奥' }));
-      this.cats.push(new Cat(this.width * 0.7, this.height - 70, { breed: BREEDS[3], name: '雪球' }));
+      const floorY = physicsWorld.getFloorY(this.height);
 
-      this.furniture.push(new CatTree(this.width * 0.85, this.height));
-      this.furniture.push(new Roomba(this.width * 0.2, this.height - 20));
-      this.furniture.push(new Scratcher(this.width * 0.65, this.height));
+      // 默认生成 3 只可爱猫咪，位于抬高安全的室内地毯上，绝不与底栏遮挡
+      this.cats.push(new Cat(this.width * 0.35, floorY - 35, { breed: BREEDS[0], name: '大橘' }));
+      this.cats.push(new Cat(this.width * 0.5, floorY - 35, { breed: BREEDS[1], name: '奥利奥' }));
+      this.cats.push(new Cat(this.width * 0.65, floorY - 35, { breed: BREEDS[3], name: '雪球' }));
 
-      this.toys.push(new YarnBall(this.width * 0.4, this.height - 100));
-      this.toys.push(new CardboardBox(this.width * 0.52, this.height - 60));
+      // 纵向猫道跳台与景观大窗系统 (猫咪最爱的立体高空领地)
+      this.furniture.push(new WindowSill(this.width * 0.16, this.height * 0.28));
+      this.furniture.push(new WallPerch(this.width * 0.38, this.height * 0.42));
+      this.furniture.push(new WallPerch(this.width * 0.82, this.height * 0.36));
+
+      // 丰富地面家具
+      this.furniture.push(new CatTree(this.width * 0.88, floorY));
+      this.furniture.push(new Roomba(this.width * 0.25, floorY - 20));
+      this.furniture.push(new Scratcher(this.width * 0.68, floorY));
+
+      this.toys.push(new YarnBall(this.width * 0.45, floorY - 60));
+      this.toys.push(new CardboardBox(this.width * 0.55, floorY - 30));
     }
 
     spawnParticle(x, y, text) {
@@ -226,14 +236,26 @@
           this.mouse.draggedCat.vy = (pos.y - this.lastMousePos.y) * 0.8;
         }
 
+        // 智能光标与触碰感知 (猫咪看到手靠近会准备被摸或抓起)
+        let isHoveringCat = false;
+        for (let c of this.cats) {
+          if (Math.hypot(c.x - pos.x, c.y - pos.y) < c.radius + 16) {
+            isHoveringCat = true;
+            break;
+          }
+        }
+        if (!this.laser.active && !featherWand.active) {
+          this.canvas.style.cursor = this.mouse.draggedCat ? 'grabbing' : (isHoveringCat ? 'grab' : 'default');
+        }
+
         // 抚摸手势检测
         if (this.currentTool === 'pet' && this.mouse.isDown) {
           const delta = Math.hypot(pos.x - this.lastMousePos.x, pos.y - this.lastMousePos.y);
           this.petDistanceTracker += delta;
-          if (this.petDistanceTracker > 35) {
+          if (this.petDistanceTracker > 30) {
             this.petDistanceTracker = 0;
             for (let c of this.cats) {
-              if (Math.hypot(c.x - pos.x, c.y - pos.y) < c.radius + 18) {
+              if (Math.hypot(c.x - pos.x, c.y - pos.y) < c.radius + 20) {
                 c.pet(this);
                 break;
               }
@@ -251,9 +273,9 @@
           c.isGrabbed = false;
           c.state = 'idle';
 
-          // 如果只是单纯点击未拖动，打开身份证
-          if (duration < 250 && Math.hypot(c.vx, c.vy) < 2) {
-            uiManager.openCatPassport(c);
+          // 如果只是单纯点击未拖动，直接把猫咪抱入怀中特写侍奉！
+          if (duration < 280 && Math.hypot(c.vx, c.vy) < 2.5) {
+            uiManager.openCloseUpStudio(c);
           }
           this.mouse.draggedCat = null;
         }
@@ -406,6 +428,17 @@
         };
       });
 
+      // 底部工具抽屉一键折叠/展开
+      const dockToggleBtn = document.getElementById('dock-toggle-btn');
+      const dockWrapper = document.getElementById('dock-wrapper');
+      if (dockToggleBtn && dockWrapper) {
+        dockToggleBtn.onclick = () => {
+          dockWrapper.classList.toggle('collapsed');
+          const isCollapsed = dockWrapper.classList.contains('collapsed');
+          dockToggleBtn.innerHTML = isCollapsed ? '▲ 展开侍奉坞' : '▼ 收起抽屉 (纯净吸猫)';
+        };
+      }
+
       // 模态关闭
       const closePassport = document.getElementById('btn-close-passport');
       if (closePassport) closePassport.onclick = () => uiManager.closeCatPassport();
@@ -443,10 +476,11 @@
         const list = JSON.parse(raw);
         if (!Array.isArray(list) || list.length === 0) return false;
 
+        const floorY = physicsWorld.getFloorY(this.height);
         this.cats = list.map((item, idx) => {
           const breed = BREEDS.find(b => b.id === item.breedId) || BREEDS[0];
           const personality = PERSONALITIES.find(p => p.id === item.personalityId) || PERSONALITIES[0];
-          const cat = new Cat(this.width * 0.25 + idx * 120, this.height - 70, {
+          const cat = new Cat(this.width * 0.25 + idx * 120, floorY - 35, {
             name: item.name,
             breed,
             personality,
@@ -457,11 +491,14 @@
           return cat;
         });
 
-        // 配套家具
-        this.furniture.push(new CatTree(this.width * 0.85, this.height));
-        this.furniture.push(new Roomba(this.width * 0.2, this.height - 20));
-        this.furniture.push(new Scratcher(this.width * 0.65, this.height));
-        this.toys.push(new YarnBall(this.width * 0.45, this.height - 100));
+        // 配套家具与立体高空领地
+        this.furniture.push(new WindowSill(this.width * 0.16, this.height * 0.28));
+        this.furniture.push(new WallPerch(this.width * 0.38, this.height * 0.42));
+        this.furniture.push(new WallPerch(this.width * 0.82, this.height * 0.36));
+        this.furniture.push(new CatTree(this.width * 0.88, floorY));
+        this.furniture.push(new Roomba(this.width * 0.25, floorY - 20));
+        this.furniture.push(new Scratcher(this.width * 0.68, floorY));
+        this.toys.push(new YarnBall(this.width * 0.45, floorY - 60));
 
         return true;
       } catch (e) {

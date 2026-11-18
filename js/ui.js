@@ -20,6 +20,7 @@
     init() {
       this.bindPassportEvents();
       this.bindSnapshotEvents();
+      this.bindStudioEvents();
     }
 
     showToast(msg, duration = 3000) {
@@ -182,6 +183,15 @@
             this.selectedCat.name = nameInput.value.trim();
             if (window.CyberMeow.saveState) window.CyberMeow.saveState();
           }
+        };
+      }
+
+      const holdBtn = document.getElementById('btn-passport-hold');
+      if (holdBtn) {
+        holdBtn.onclick = () => {
+          const cat = this.selectedCat;
+          this.closeCatPassport();
+          if (cat) this.openCloseUpStudio(cat);
         };
       }
     }
@@ -353,6 +363,326 @@
       this.targetStar = null;
       const hud = document.getElementById('challenge-hud');
       if (hud) hud.style.display = 'none';
+    }
+
+    // --- 抱入怀中·桌面特写侍奉台 (Close-up Care Studio) ---
+    openCloseUpStudio(cat) {
+      this.studioCat = cat;
+      this.studioTool = 'brush';
+      this.studioParticles = [];
+      this.studioPurrTimer = 0;
+      this.studioTongueOut = 0;
+
+      const modal = document.getElementById('studio-modal');
+      const title = document.getElementById('studio-cat-name');
+      if (!modal) return;
+
+      if (title) title.innerText = `与「${cat.name}」的亲密时光 🐾`;
+      modal.classList.add('open');
+
+      soundEngine.playMeow(cat.pitchMod, 'pleading');
+      this.startStudioAnimation();
+      this.updateStudioToolUI();
+    }
+
+    closeCloseUpStudio() {
+      const modal = document.getElementById('studio-modal');
+      if (modal) modal.classList.remove('open');
+      this.studioCat = null;
+      cancelAnimationFrame(this.studioAnimId);
+      soundEngine.stopPurr();
+    }
+
+    setStudioTool(tool) {
+      this.studioTool = tool;
+      this.updateStudioToolUI();
+      soundEngine.playPop();
+    }
+
+    updateStudioToolUI() {
+      document.querySelectorAll('.studio-tool-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tool === this.studioTool);
+      });
+    }
+
+    bindStudioEvents() {
+      const closeBtn = document.getElementById('btn-close-studio');
+      if (closeBtn) closeBtn.onclick = () => this.closeCloseUpStudio();
+
+      document.querySelectorAll('.studio-tool-btn').forEach(btn => {
+        btn.onclick = () => {
+          if (btn.dataset.tool) this.setStudioTool(btn.dataset.tool);
+        };
+      });
+
+      const canvas = document.getElementById('studio-canvas');
+      if (!canvas) return;
+
+      let isDown = false;
+      let lastX = 0, lastY = 0;
+
+      const onPointerDown = (e) => {
+        isDown = true;
+        soundEngine.init();
+        const rect = canvas.getBoundingClientRect();
+        lastX = e.clientX - rect.left;
+        lastY = e.clientY - rect.top;
+        this.interactStudio(lastX, lastY);
+      };
+
+      const onPointerMove = (e) => {
+        if (!isDown) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        if (Math.hypot(x - lastX, y - lastY) > 16) {
+          this.interactStudio(x, y);
+          lastX = x;
+          lastY = y;
+        }
+      };
+
+      const onPointerUp = () => {
+        isDown = false;
+        soundEngine.stopPurr();
+      };
+
+      canvas.addEventListener('pointerdown', onPointerDown);
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+    }
+
+    interactStudio(x, y) {
+      if (!this.studioCat) return;
+      const cat = this.studioCat;
+
+      if (this.studioTool === 'brush') {
+        // 舒爽梳毛
+        soundEngine.playScratch();
+        soundEngine.startPurr();
+        cat.affection = Math.min(100, cat.affection + 2);
+        this.studioPurrTimer = 40;
+
+        // 浮毛飘舞粒子
+        for (let i = 0; i < 3; i++) {
+          this.studioParticles.push({
+            x: x + (Math.random() - 0.5) * 30,
+            y: y + (Math.random() - 0.5) * 20,
+            vx: (Math.random() - 0.5) * 1.5,
+            vy: -1.2 - Math.random() * 1.5,
+            text: '☁️',
+            alpha: 1.0,
+            scale: 0.8
+          });
+        }
+      } else if (this.studioTool === 'chin') {
+        // 挠挠下巴
+        soundEngine.startPurr();
+        cat.affection = Math.min(100, cat.affection + 3);
+        this.studioPurrTimer = 50;
+
+        this.studioParticles.push({
+          x: x + (Math.random() - 0.5) * 20,
+          y: y - 10,
+          vx: (Math.random() - 0.5) * 1.2,
+          vy: -2,
+          text: '❤️',
+          alpha: 1.0,
+          scale: 1.0
+        });
+      } else if (this.studioTool === 'churu') {
+        // 挤猫条舔舐
+        soundEngine.playCrunch();
+        cat.hunger = Math.min(100, cat.hunger + 8);
+        this.studioTongueOut = 30;
+
+        this.studioParticles.push({
+          x, y,
+          vx: (Math.random() - 0.5) * 1.0,
+          vy: -1.8,
+          text: '🐟',
+          alpha: 1.0,
+          scale: 1.0
+        });
+      }
+    }
+
+    startStudioAnimation() {
+      const canvas = document.getElementById('studio-canvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+
+      const render = () => {
+        if (!this.studioCat) return;
+        const cat = this.studioCat;
+        const w = canvas.width = 380;
+        const h = canvas.height = 240;
+
+        ctx.clearRect(0, 0, w, h);
+
+        // 1. 柔软舒适的毛绒大坐垫
+        ctx.save();
+        ctx.translate(w / 2, h - 35);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 150, 26, 0, 0, Math.PI * 2);
+        ctx.fillStyle = '#ff7675';
+        ctx.fill();
+        ctx.strokeStyle = '#d63031';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+
+        // 坐垫绒毛花边
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+
+        // 2. 猫咪大特写绘制 (居中坐姿，大头呆萌)
+        ctx.save();
+        ctx.translate(w / 2, h - 90);
+        const breath = Math.sin(Date.now() * 0.004) * 2;
+        const isHappy = this.studioPurrTimer > 0;
+        if (this.studioPurrTimer > 0) this.studioPurrTimer--;
+        if (this.studioTongueOut > 0) this.studioTongueOut--;
+
+        // 身体
+        ctx.beginPath();
+        ctx.ellipse(0, 20 + breath, 52, 44, 0, 0, Math.PI * 2);
+        ctx.fillStyle = cat.breed.bodyColor;
+        ctx.fill();
+
+        // 肚皮
+        ctx.beginPath();
+        ctx.ellipse(0, 24 + breath, 32, 28, 0, 0, Math.PI * 2);
+        ctx.fillStyle = cat.breed.bellyColor;
+        ctx.fill();
+
+        // 头部
+        const headR = 46;
+        const headY = -18 + breath * 0.5;
+
+        // 耳朵
+        ctx.fillStyle = cat.breed.bodyColor;
+        // 左耳 (舒服时飞机耳轻微外撇)
+        const earSplay = isHappy ? 0.2 : 0;
+        ctx.save();
+        ctx.rotate(-earSplay);
+        ctx.beginPath();
+        ctx.moveTo(-headR * 0.8, headY - 8);
+        ctx.lineTo(-headR * 0.75, headY - headR * 1.4);
+        ctx.lineTo(-headR * 0.15, headY - headR * 0.8);
+        ctx.fill();
+        ctx.fillStyle = cat.breed.earColor;
+        ctx.beginPath();
+        ctx.moveTo(-headR * 0.65, headY - 8);
+        ctx.lineTo(-headR * 0.6, headY - headR * 1.2);
+        ctx.lineTo(-headR * 0.2, headY - headR * 0.7);
+        ctx.fill();
+        ctx.restore();
+
+        // 右耳
+        ctx.save();
+        ctx.rotate(earSplay);
+        ctx.fillStyle = cat.breed.bodyColor;
+        ctx.beginPath();
+        ctx.moveTo(headR * 0.15, headY - headR * 0.8);
+        ctx.lineTo(headR * 0.75, headY - headR * 1.4);
+        ctx.lineTo(headR * 0.8, headY - 8);
+        ctx.fill();
+        ctx.fillStyle = cat.breed.earColor;
+        ctx.beginPath();
+        ctx.moveTo(headR * 0.2, headY - headR * 0.7);
+        ctx.lineTo(headR * 0.6, headY - headR * 1.2);
+        ctx.lineTo(headR * 0.65, headY - 8);
+        ctx.fill();
+        ctx.restore();
+
+        // 大圆脸
+        ctx.beginPath();
+        ctx.arc(0, headY, headR, 0, Math.PI * 2);
+        ctx.fillStyle = cat.breed.bodyColor;
+        ctx.fill();
+
+        // 眼睛 (舒服被抚摸时闭眼眯眯笑)
+        if (isHappy) {
+          ctx.strokeStyle = '#2d3436';
+          ctx.lineWidth = 3.5;
+          ctx.beginPath();
+          ctx.arc(-headR * 0.4, headY - 3, 8, Math.PI, 0);
+          ctx.arc(headR * 0.4, headY - 3, 8, Math.PI, 0);
+          ctx.stroke();
+        } else {
+          // 宝石大圆眼
+          ctx.fillStyle = cat.breed.eyeColor;
+          ctx.beginPath();
+          ctx.ellipse(-headR * 0.4, headY - 3, 9, 11, 0, 0, Math.PI * 2);
+          ctx.ellipse(headR * 0.4, headY - 3, 9, 11, 0, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = '#111';
+          ctx.beginPath();
+          ctx.arc(-headR * 0.4, headY - 3, 5, 0, Math.PI * 2);
+          ctx.arc(headR * 0.4, headY - 3, 5, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = '#fff';
+          ctx.beginPath();
+          ctx.arc(-headR * 0.4 - 2, headY - 6, 3, 0, Math.PI * 2);
+          ctx.arc(headR * 0.4 - 2, headY - 6, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // 鼻子
+        ctx.fillStyle = '#ff7675';
+        ctx.beginPath();
+        ctx.arc(0, headY + 8, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 吃猫条舌头动画
+        if (this.studioTongueOut > 0) {
+          ctx.fillStyle = '#ff9ff3';
+          ctx.beginPath();
+          ctx.arc(0, headY + 16, 7, 0, Math.PI);
+          ctx.fill();
+        }
+
+        // 胡须
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.moveTo(-15, headY + 9); ctx.lineTo(-45, headY + 5);
+        ctx.moveTo(-15, headY + 13); ctx.lineTo(-45, headY + 16);
+        ctx.moveTo(15, headY + 9); ctx.lineTo(45, headY + 5);
+        ctx.moveTo(15, headY + 13); ctx.lineTo(45, headY + 16);
+        ctx.stroke();
+
+        // 佩戴帽子
+        cat.drawHat(ctx, headY, headR);
+
+        ctx.restore();
+
+        // 3. 互动飘飞粒子渲染
+        for (let i = this.studioParticles.length - 1; i >= 0; i--) {
+          const p = this.studioParticles[i];
+          p.x += p.vx;
+          p.y += p.vy;
+          p.alpha -= 0.025;
+
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, p.alpha);
+          ctx.font = '22px sans-serif';
+          ctx.fillText(p.text, p.x, p.y);
+          ctx.restore();
+
+          if (p.alpha <= 0) this.studioParticles.splice(i, 1);
+        }
+
+        this.studioAnimId = requestAnimationFrame(render);
+      };
+
+      render();
     }
   }
 

@@ -1,13 +1,155 @@
 /**
- * CyberMeow - 家具与环境设施系统
- * 包含：智能扫地机 (Roomba)、多层猫爬架 (Cat Tree)、猫抓板 (Scratcher)、纸箱 (Box)、温暖阳光斑 (Sunbeam)
+ * CyberMeow - 猫生空间家具系统 (Cat-Centric Furniture)
+ * 包含：墙面高空跳台 (WallPerch)、景观飞鸟大窗 (WindowSill)、智能扫地机 (Roomba)、多层猫爬架 (CatTree)、瓦楞猫抓板 (Scratcher)、温暖阳光光斑 (Sunbeam)
  */
 (function(window) {
   'use strict';
 
   const { MathUtils, physicsWorld } = window.CyberMeow;
 
-  // 1. 智能扫地机器人 (Roomba)
+  // 1. 墙面高空跳台 (WallPerch) - 猫咪最爱的高处领地！
+  class WallPerch {
+    constructor(x, y, w = 120, h = 16) {
+      this.type = 'perch';
+      this.x = x;
+      this.y = y;
+      this.w = w;
+      this.h = h;
+      this.occupant = null;
+    }
+
+    update(width, height) {
+      if (this.occupant && this.occupant.perchedTier !== this) {
+        this.occupant = null;
+      }
+    }
+
+    draw(ctx) {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+
+      // 三角支撑架
+      ctx.fillStyle = '#8b5a2b';
+      ctx.beginPath();
+      ctx.moveTo(-this.w * 0.35, this.h);
+      ctx.lineTo(-this.w * 0.35, this.h + 24);
+      ctx.lineTo(-this.w * 0.15, this.h);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(this.w * 0.35, this.h);
+      ctx.lineTo(this.w * 0.35, this.h + 24);
+      ctx.lineTo(this.w * 0.15, this.h);
+      ctx.closePath();
+      ctx.fill();
+
+      // 跳台实木板
+      ctx.fillStyle = '#deb887';
+      ctx.beginPath();
+      ctx.roundRect(-this.w / 2, 0, this.w, this.h, [5]);
+      ctx.fill();
+      ctx.strokeStyle = '#a0522d';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // 柔软绒布软垫
+      ctx.fillStyle = '#ffb8b8';
+      ctx.beginPath();
+      ctx.roundRect(-this.w / 2 + 8, -4, this.w - 16, 5, [3]);
+      ctx.fill();
+
+      ctx.restore();
+    }
+  }
+
+  // 2. 景观大窗台 (WindowSill) - 看飞鸟放空专属
+  class WindowSill {
+    constructor(x, y, w = 180, h = 140) {
+      this.type = 'window';
+      this.x = x;
+      this.y = y;
+      this.w = w;
+      this.h = h;
+      this.birds = [{ x: -20, y: 30, vx: 1.2, flap: 0 }];
+    }
+
+    update(width, height) {
+      // 窗外小鸟飞行模拟
+      this.birds.forEach(b => {
+        b.x += b.vx;
+        b.flap += 0.25;
+        if (b.x > this.w + 40) {
+          b.x = -40;
+          b.y = 20 + Math.random() * (this.h - 50);
+          b.vx = 0.8 + Math.random() * 1.0;
+        }
+      });
+    }
+
+    draw(ctx) {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+
+      // 窗外天空背景
+      ctx.fillStyle = '#81ecec';
+      ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
+
+      // 窗外云朵
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.beginPath();
+      ctx.arc(-20, -20, 22, 0, Math.PI * 2);
+      ctx.arc(10, -26, 18, 0, Math.PI * 2);
+      ctx.arc(35, -20, 16, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 窗外飞过的小鸟 (吸引猫咪注视)
+      this.birds.forEach(b => {
+        const bx = -this.w / 2 + b.x;
+        const by = -this.h / 2 + b.y;
+        if (bx >= -this.w / 2 + 5 && bx <= this.w / 2 - 5) {
+          ctx.fillStyle = '#2d3436';
+          ctx.beginPath();
+          ctx.arc(bx, by, 3, 0, Math.PI * 2);
+          ctx.fill();
+          // 小翅膀扑棱
+          const wingY = Math.sin(b.flap) * 4;
+          ctx.strokeStyle = '#2d3436';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(bx - 4, by + wingY);
+          ctx.lineTo(bx, by);
+          ctx.lineTo(bx + 4, by + wingY);
+          ctx.stroke();
+        }
+      });
+
+      // 实木白色窗框
+      ctx.strokeStyle = '#dfe4ea';
+      ctx.lineWidth = 8;
+      ctx.strokeRect(-this.w / 2, -this.h / 2, this.w, this.h);
+
+      // 十字窗格
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(0, -this.h / 2);
+      ctx.lineTo(0, this.h / 2);
+      ctx.moveTo(-this.w / 2, 0);
+      ctx.lineTo(this.w / 2, 0);
+      ctx.stroke();
+
+      // 突出窗台 (猫咪可趴卧)
+      ctx.fillStyle = '#f1f2f6';
+      ctx.fillRect(-this.w / 2 - 12, this.h / 2 - 4, this.w + 24, 12);
+      ctx.strokeStyle = '#ced6e0';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(-this.w / 2 - 12, this.h / 2 - 4, this.w + 24, 12);
+
+      ctx.restore();
+    }
+  }
+
+  // 3. 智能扫地机器人 (Roomba)
   class Roomba {
     constructor(x, y) {
       this.type = 'roomba';
@@ -15,9 +157,9 @@
       this.y = y;
       this.vx = 1.4;
       this.vy = 0;
-      this.radius = 32;
-      this.height = 16;
-      this.rider = null; // 坐在上面的猫咪
+      this.radius = 34;
+      this.height = 18;
+      this.rider = null;
       this.bumpCooldown = 0;
       this.ledPhase = 0;
     }
@@ -29,7 +171,7 @@
       this.x += this.vx;
       this.y += this.vy;
 
-      const floor = height - this.height;
+      const floor = physicsWorld.getFloorY(height) - this.height / 2;
       if (this.y > floor) {
         this.y = floor;
         this.vy = 0;
@@ -37,23 +179,23 @@
 
       // 撞墙折返
       if (this.bumpCooldown > 0) this.bumpCooldown--;
-      if (this.x < this.radius + 10) {
-        this.x = this.radius + 10;
+      if (this.x < this.radius + 15) {
+        this.x = this.radius + 15;
         this.vx = Math.abs(this.vx);
         this.bump();
-      } else if (this.x > width - this.radius - 10) {
-        this.x = width - this.radius - 10;
+      } else if (this.x > width - this.radius - 15) {
+        this.x = width - this.radius - 15;
         this.vx = -Math.abs(this.vx);
         this.bump();
       }
 
-      // 检查乘客猫咪
+      // 乘客猫咪
       if (this.rider) {
         if (this.rider.ridingObj !== this || this.rider.isGrabbed) {
           this.rider = null;
         } else {
           this.rider.x = this.x;
-          this.rider.y = this.y - this.height - 12;
+          this.rider.y = this.y - this.height - 10;
           this.rider.vx = this.vx;
           this.rider.vy = 0;
         }
@@ -96,13 +238,13 @@
       ctx.fillStyle = '#1e272e';
       ctx.fill();
 
-      // 激光雷达小圆凸起
+      // 激光雷达小凸起
       ctx.beginPath();
       ctx.arc(0, -6, 7, 0, Math.PI * 2);
       ctx.fillStyle = '#485460';
       ctx.fill();
 
-      // 呼吸 LED 灯
+      // 呼吸 LED
       const glow = (Math.sin(this.ledPhase) + 1) * 0.5;
       ctx.beginPath();
       ctx.arc(0, -6, 3, 0, Math.PI * 2);
@@ -115,21 +257,20 @@
     }
   }
 
-  // 2. 多层豪华猫爬架 (Cat Tree)
+  // 4. 多层豪华猫爬架 (CatTree)
   class CatTree {
     constructor(x, y) {
       this.type = 'cattree';
       this.x = x;
-      this.y = y; // 底座坐标
-      this.width = 120;
+      this.y = y;
+      this.width = 130;
       this.tiers = [
-        { yOffset: -120, xOffset: -20, w: 90, h: 14, occupant: null }, // 中层平台
-        { yOffset: -240, xOffset: 20, w: 80, h: 14, occupant: null }   // 顶层观景台
+        { yOffset: -110, xOffset: -22, w: 90, h: 14, occupant: null },
+        { yOffset: -210, xOffset: 22, w: 85, h: 14, occupant: null }
       ];
-      // 吊绳毛球
       this.dangleBall = {
         x: x + 40,
-        y: y - 180,
+        y: y - 160,
         vy: 0,
         vx: 0,
         color: '#ff4757'
@@ -137,21 +278,21 @@
     }
 
     update(width, height) {
-      // 检查各层占用者
+      const floor = physicsWorld.getFloorY(height);
+      this.y = floor;
+
       this.tiers.forEach(tier => {
-        if (tier.occupant) {
-          if (tier.occupant.perchedTier !== tier) {
-            tier.occupant = null;
-          }
+        if (tier.occupant && tier.occupant.perchedTier !== tier) {
+          tier.occupant = null;
         }
       });
 
-      // 摇晃吊绳毛球
+      // 吊绳小球晃动
       this.dangleBall.vx *= 0.95;
       this.dangleBall.vy += 0.15;
       this.dangleBall.y += this.dangleBall.vy;
-      const anchorY = this.y - 230;
-      const ropeLen = 50;
+      const anchorY = this.y - 200;
+      const ropeLen = 45;
       if (this.dangleBall.y > anchorY + ropeLen) {
         this.dangleBall.y = anchorY + ropeLen;
         this.dangleBall.vy = -this.dangleBall.vy * 0.5;
@@ -168,19 +309,19 @@
       ctx.strokeStyle = '#8b5a2b';
       ctx.strokeRect(-this.width / 2, -18, this.width, 18);
 
-      // 立柱 (缠绕麻绳纹理)
+      // 麻绳立柱
       ctx.fillStyle = '#e8d8b8';
-      ctx.fillRect(-12, -240, 24, 222);
+      ctx.fillRect(-12, -210, 24, 192);
       ctx.strokeStyle = '#c2a677';
       ctx.lineWidth = 1;
-      for (let py = -240; py < -18; py += 8) {
+      for (let py = -210; py < -18; py += 8) {
         ctx.beginPath();
         ctx.moveTo(-12, py);
         ctx.lineTo(12, py + 2);
         ctx.stroke();
       }
 
-      // 绘制各层平台
+      // 各层平台
       this.tiers.forEach((tier, idx) => {
         ctx.fillStyle = '#deb887';
         ctx.beginPath();
@@ -189,7 +330,6 @@
         ctx.strokeStyle = '#a0522d';
         ctx.stroke();
 
-        // 顶层软垫
         if (idx === 1) {
           ctx.fillStyle = '#ff7675';
           ctx.beginPath();
@@ -198,9 +338,9 @@
         }
       });
 
-      // 吊绳与小球
+      // 吊球
       const anchorX = 40;
-      const anchorY = -230;
+      const anchorY = -200;
       ctx.strokeStyle = '#f5cd79';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -217,33 +357,30 @@
     }
   }
 
-  // 3. 瓦楞纸猫抓板 (Scratching Post)
+  // 5. 瓦楞猫抓板 (Scratcher)
   class Scratcher {
     constructor(x, y) {
       this.type = 'scratcher';
       this.x = x;
       this.y = y;
-      this.w = 70;
+      this.w = 75;
       this.h = 24;
-      this.user = null;
     }
 
     update(width, height) {
-      this.y = height - 8;
+      this.y = physicsWorld.getFloorY(height);
     }
 
     draw(ctx) {
       ctx.save();
       ctx.translate(this.x, this.y);
 
-      // 瓦楞纸横截面
       ctx.fillStyle = '#c8a06d';
       ctx.fillRect(-this.w / 2, -this.h, this.w, this.h);
       ctx.strokeStyle = '#8b5a2b';
       ctx.strokeRect(-this.w / 2, -this.h, this.w, this.h);
 
-      // 瓦楞细密纹理
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.18)';
       ctx.lineWidth = 1;
       for (let px = -this.w / 2 + 4; px < this.w / 2; px += 4) {
         ctx.beginPath();
@@ -256,9 +393,9 @@
     }
   }
 
-  // 4. 温暖阳光斑 (Sunbeam)
+  // 6. 温暖阳光斑 (Sunbeam)
   class Sunbeam {
-    constructor(x, y, w = 180) {
+    constructor(x, y, w = 190) {
       this.type = 'sunbeam';
       this.x = x;
       this.y = y;
@@ -272,26 +409,26 @@
 
     draw(ctx, height) {
       ctx.save();
-      const glow = Math.sin(this.pulse) * 0.05 + 0.18;
+      const floorY = physicsWorld.getFloorY(height);
+      const glow = Math.sin(this.pulse) * 0.05 + 0.2;
 
-      // 阳光光锥渐变
-      const grad = ctx.createLinearGradient(this.x - 60, 0, this.x, height);
+      const grad = ctx.createLinearGradient(this.x - 70, 0, this.x, floorY);
       grad.addColorStop(0, 'rgba(255, 234, 167, 0.02)');
       grad.addColorStop(0.7, `rgba(255, 234, 167, ${glow})`);
-      grad.addColorStop(1, `rgba(254, 202, 87, ${glow + 0.08})`);
+      grad.addColorStop(1, `rgba(254, 202, 87, ${glow + 0.1})`);
 
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.moveTo(this.x - 80, 0);
       ctx.lineTo(this.x + 40, 0);
-      ctx.lineTo(this.x + this.width / 2 + 30, height - 8);
-      ctx.lineTo(this.x - this.width / 2 - 30, height - 8);
+      ctx.lineTo(this.x + this.width / 2 + 25, floorY);
+      ctx.lineTo(this.x - this.width / 2 - 25, floorY);
       ctx.closePath();
       ctx.fill();
 
       // 地面温暖光晕
       ctx.beginPath();
-      ctx.ellipse(this.x, height - 8, this.width * 0.6, 14, 0, 0, Math.PI * 2);
+      ctx.ellipse(this.x, floorY, this.width * 0.55, 12, 0, 0, Math.PI * 2);
       ctx.fillStyle = `rgba(255, 204, 0, ${glow * 0.8})`;
       ctx.fill();
 
@@ -300,6 +437,8 @@
   }
 
   window.CyberMeow = window.CyberMeow || {};
+  window.CyberMeow.WallPerch = WallPerch;
+  window.CyberMeow.WindowSill = WindowSill;
   window.CyberMeow.Roomba = Roomba;
   window.CyberMeow.CatTree = CatTree;
   window.CyberMeow.Scratcher = Scratcher;

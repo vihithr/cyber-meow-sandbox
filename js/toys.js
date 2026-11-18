@@ -40,7 +40,7 @@
       }
 
       // 地面与边界碰撞
-      const floor = height - this.radius - 8;
+      const floor = physicsWorld.getFloorY(height) - this.radius;
       if (this.y > floor) {
         this.y = floor;
         this.vy = -this.vy * 0.65;
@@ -119,7 +119,7 @@
       this.x += this.vx;
       this.y += this.vy;
 
-      const floor = height - 16;
+      const floor = physicsWorld.getFloorY(height) - 8;
       if (this.y > floor) {
         this.y = floor;
         this.vy = -this.vy * 0.3;
@@ -164,7 +164,7 @@
       this.x += this.vx;
       this.y += this.vy;
 
-      const floor = height - this.h / 2 - 8;
+      const floor = physicsWorld.getFloorY(height) - this.h / 2;
       if (this.y > floor) {
         this.y = floor;
         this.vy = 0;

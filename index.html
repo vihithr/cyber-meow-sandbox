@@ -48,20 +48,23 @@
   <!-- 浮动操作提示 Toast -->
   <div class="hint-toast" id="hint-text">💡 正在初始化赛博猫咪世界...</div>
 
-  <!-- 底部多功能互动玩具与家具 Dock 栏 -->
-  <div id="dock-container">
-    <button class="dock-item active" data-tool="pet" title="快捷键: 1">👆 抚摸/抓起</button>
-    <button class="dock-item" data-tool="cat" title="快捷键: 2">🐱 召唤猫咪</button>
-    <button class="dock-item" data-tool="laser" title="快捷键: 3">🔴 激光红点</button>
-    <button class="dock-item" data-tool="feather" title="快捷键: 4">🪶 逗猫棒</button>
-    <button class="dock-item" data-tool="fish" title="快捷键: 5">🐟 投喂鱼干</button>
-    <button class="dock-item" data-tool="yarn" title="快捷键: 6">🧶 扔毛线球</button>
-    <button class="dock-item" data-tool="box" title="快捷键: 7">📦 放置纸箱</button>
-    <button class="dock-item" data-tool="cattree" title="快捷键: 8">🌳 豪华猫爬架</button>
-    <button class="dock-item" data-tool="roomba" title="快捷键: 9">🤖 扫地机</button>
-    <button class="dock-item" data-tool="scratcher">🪵 瓦楞抓板</button>
-    <button class="dock-item" data-tool="catnip" title="快捷键: 0">🌿 猫薄荷喷雾</button>
-    <button class="dock-item" id="btn-antigravity" title="快捷键: 空格键">🛸 反重力模式</button>
+  <!-- 底部多功能互动玩具与家具 Dock 抽屉 (支持一键折叠，安全避开猫咪) -->
+  <div id="dock-wrapper">
+    <button id="dock-toggle-btn">▼ 收起抽屉 (纯净吸猫)</button>
+    <div id="dock-container">
+      <button class="dock-item active" data-tool="pet" title="快捷键: 1">👆 抚摸/抓起</button>
+      <button class="dock-item" data-tool="cat" title="快捷键: 2">🐱 召唤猫咪</button>
+      <button class="dock-item" data-tool="laser" title="快捷键: 3">🔴 激光红点</button>
+      <button class="dock-item" data-tool="feather" title="快捷键: 4">🪶 逗猫棒</button>
+      <button class="dock-item" data-tool="fish" title="快捷键: 5">🐟 投喂鱼干</button>
+      <button class="dock-item" data-tool="yarn" title="快捷键: 6">🧶 扔毛线球</button>
+      <button class="dock-item" data-tool="box" title="快捷键: 7">📦 放置纸箱</button>
+      <button class="dock-item" data-tool="cattree" title="快捷键: 8">🌳 豪华猫爬架</button>
+      <button class="dock-item" data-tool="roomba" title="快捷键: 9">🤖 扫地机</button>
+      <button class="dock-item" data-tool="scratcher">🪵 瓦楞抓板</button>
+      <button class="dock-item" data-tool="catnip" title="快捷键: 0">🌿 猫薄荷喷雾</button>
+      <button class="dock-item" id="btn-antigravity" title="快捷键: 空格键">🛸 反重力模式</button>
+    </div>
   </div>
 
   <!-- 主物理游戏画布 -->
@@ -109,6 +112,27 @@
           <div style="font-size: 0.8rem; color: #dfe4ea; margin-bottom: 6px;">🎩 专属服饰搭配:</div>
           <div class="hat-picker" id="hat-picker-opts"></div>
         </div>
+
+        <button class="pill-btn active" id="btn-passport-hold" style="width: 100%; justify-content: center; margin-top: 14px; font-size: 0.95rem;">🐾 抱入怀中 (特写侍奉)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 怀抱特写侍奉台 (Close-up Studio Modal) -->
+  <div class="modal-overlay" id="studio-modal">
+    <div class="studio-card">
+      <div class="studio-header">
+        <h3 id="studio-cat-name">🐾 亲密侍奉时光</h3>
+        <button class="btn-close" id="btn-close-studio">&times;</button>
+      </div>
+      <canvas id="studio-canvas" width="380" height="240"></canvas>
+      <div class="studio-actions-bar">
+        <button class="studio-tool-btn active" data-tool="brush">🪮 舒爽梳毛</button>
+        <button class="studio-tool-btn" data-tool="chin">🖐️ 挠挠下巴</button>
+        <button class="studio-tool-btn" data-tool="churu">🐟 撕开猫条</button>
+      </div>
+      <div style="font-size: 0.8rem; color: #a4b0be; margin-top: 10px;">
+        💡 提示：在猫咪身上按住轻柔滑动，享受沉浸式呼噜声与浮毛飞舞~
       </div>
     </div>
   </div>

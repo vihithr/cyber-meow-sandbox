@@ -112,13 +112,64 @@
         ctx.fillRect(0, 0, width, height);
       }
 
-      // 木地板
-      const floorH = 10;
-      ctx.fillStyle = this.theme === 'sunny_day' ? '#c89e6c' : '#232530';
-      ctx.fillRect(0, height - floorH, width, floorH);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      // 物理地板与室内空间分区
+      const floorY = physicsWorld.getFloorY(height);
+      const isDay = this.theme === 'sunny_day';
+
+      // 1. 实木地板 (从安全线 floorY 到底部)
+      ctx.fillStyle = isDay ? '#cda372' : '#1c1e28';
+      ctx.fillRect(0, floorY, width, height - floorY);
+
+      // 地板木纹拼缝线条
+      ctx.strokeStyle = isDay ? 'rgba(139, 90, 43, 0.15)' : 'rgba(0, 0, 0, 0.25)';
       ctx.lineWidth = 1;
-      ctx.strokeRect(0, height - floorH, width, floorH);
+      for (let x = 60; x < width; x += 140) {
+        ctx.beginPath();
+        ctx.moveTo(x, floorY);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+      }
+
+      // 实木踢脚线 (Skirting Line) 明确墙地交界
+      ctx.fillStyle = isDay ? '#8b5a2b' : '#14151e';
+      ctx.fillRect(0, floorY - 8, width, 8);
+      ctx.strokeStyle = isDay ? '#5c3a1e' : '#0b0c12';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(0, floorY - 8, width, 8);
+
+      // 2. 居中豪华羊毛绒地毯 (波斯/奶油流苏毯，猫咪最喜欢的趴卧中心)
+      const rugW = Math.min(width * 0.45, 420);
+      const rugH = 24;
+      const rugY = floorY + 12;
+
+      // 地毯阴影
+      ctx.beginPath();
+      ctx.ellipse(width / 2, rugY + 3, rugW + 4, rugH + 4, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+      ctx.fill();
+
+      // 地毯本体
+      ctx.beginPath();
+      ctx.ellipse(width / 2, rugY, rugW, rugH, 0, 0, Math.PI * 2);
+      ctx.fillStyle = isDay ? '#f7d794' : '#303952';
+      ctx.fill();
+      ctx.strokeStyle = isDay ? '#e77f67' : '#596275';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // 地毯内圈花纹
+      ctx.beginPath();
+      ctx.ellipse(width / 2, rugY, rugW * 0.75, rugH * 0.65, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = isDay ? 'rgba(231, 127, 103, 0.4)' : 'rgba(255, 255, 255, 0.15)';
+      ctx.setLineDash([6, 6]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // 地毯边缘两端流苏
+      ctx.fillStyle = isDay ? '#fff' : '#dfe4ea';
+      for (let i = -rugW + 10; i < rugW - 10; i += 12) {
+        ctx.fillRect(width / 2 + i, rugY + rugH - 2, 2, 4);
+      }
 
       // 飘浮微尘 / 萤火虫
       this.dustParticles.forEach(p => {

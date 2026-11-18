@@ -117,6 +117,8 @@
       this.earTwitchLeft = 0;
       this.earTwitchRight = 0;
       this.walkCycle = 0;
+      this.kneadCycle = 0;
+      this.headTilt = 0;
 
       // 互动引用
       this.target = null;
@@ -148,6 +150,17 @@
         if (this.purrLevel <= 0) soundEngine.stopPurr();
       }
 
+      // 靠近人手时的蹭头与踩奶物理感知
+      if (sceneContext && sceneContext.mouse) {
+        const mouseDist = Math.hypot(sceneContext.mouse.x - this.x, sceneContext.mouse.y - this.y);
+        if (mouseDist < 65) {
+          this.headTilt = MathUtils.clamp((sceneContext.mouse.x - this.x) * 0.005, -0.25, 0.25);
+          this.kneadCycle += 0.18;
+        } else {
+          this.headTilt *= 0.88;
+        }
+      }
+
       // 猫薄荷狂欢
       if (this.catnipEnergy > 0) {
         this.catnipEnergy--;
@@ -174,8 +187,43 @@
         this.x += this.vx;
         this.y += this.vy;
 
-        // 边界处理
-        const floor = height - this.radius - 8;
+        // 边界与跳台碰撞处理
+        const floor = physicsWorld.getFloorY(height) - this.radius;
+
+        // 检查墙壁跳台与家具高台停靠 (猫咪喜欢登高)
+        let landedOnPerch = false;
+        if (this.vy >= 0 && sceneContext.furniture) {
+          for (let f of sceneContext.furniture) {
+            if (f.type === 'perch') {
+              if (Math.abs(this.x - f.x) < f.w / 2 && Math.abs((this.y + this.radius) - f.y) < 14) {
+                this.y = f.y - this.radius;
+                this.vy = 0;
+                this.vx *= 0.8;
+                this.perchedTier = f;
+                landedOnPerch = true;
+                break;
+              }
+            } else if (f.type === 'cattree' && f.tiers) {
+              for (let tier of f.tiers) {
+                const tierY = f.y + tier.yOffset;
+                const tierX = f.x + tier.xOffset;
+                if (Math.abs(this.x - tierX) < tier.w / 2 && Math.abs((this.y + this.radius) - tierY) < 14) {
+                  this.y = tierY - this.radius;
+                  this.vy = 0;
+                  this.vx *= 0.8;
+                  this.perchedTier = tier;
+                  landedOnPerch = true;
+                  break;
+                }
+              }
+            }
+          }
+        }
+
+        if (!landedOnPerch) {
+          this.perchedTier = null;
+        }
+
         if (this.y > floor) {
           this.y = floor;
           this.vy = -this.vy * 0.35;
@@ -332,6 +380,24 @@
       // 没有具体目标时的自主随机行为
       this.pupilDilation = 0.45;
       if (this.stateTimer <= 0) {
+        // 猫咪本能：跳上高处跳台俯瞰全场
+        if (Math.random() < 0.28 && sceneContext.furniture && !this.perchedTier) {
+          const perches = sceneContext.furniture.filter(f => f.type === 'perch');
+          if (perches.length > 0) {
+            const targetPerch = perches[Math.floor(Math.random() * perches.length)];
+            const dx = targetPerch.x - this.x;
+            if (Math.abs(dx) < 280 && this.y > targetPerch.y + 20) {
+              this.vy = -Math.sqrt(2 * 0.28 * (this.y - targetPerch.y + 25));
+              this.vx = dx * 0.035;
+              this.state = 'idle';
+              this.speak(Math.random() < 0.5 ? '登高俯瞰领地！' : '高处才配得上朕~');
+              soundEngine.playMeow(this.pitchMod * 1.1, 'chirp');
+              this.stateTimer = 120;
+              return;
+            }
+          }
+        }
+
         const rand = Math.random();
         if (rand < 0.4) {
           this.state = 'idle';
@@ -475,16 +541,17 @@
           ctx.fillStyle = this.breed.bodyColor;
           ctx.fill();
         } else {
-          // 四肢小肉爪步态
+          // 四肢小肉爪步态与踩奶 (Kneading) 律动
           const legPhase = Math.sin(this.walkCycle);
+          const kneadOffset = Math.sin(this.kneadCycle) * 2.5;
           ctx.fillStyle = this.breed.bodyColor;
           // 前爪
           ctx.beginPath();
-          ctx.ellipse(this.facing * 12 + legPhase * 4, this.radius + 1, 5, 4, 0, 0, Math.PI * 2);
+          ctx.ellipse(this.facing * 12 + legPhase * 4, this.radius + 1 + kneadOffset, 5, 4, 0, 0, Math.PI * 2);
           ctx.fill();
           // 后爪
           ctx.beginPath();
-          ctx.ellipse(-this.facing * 12 - legPhase * 4, this.radius + 1, 5, 4, 0, 0, Math.PI * 2);
+          ctx.ellipse(-this.facing * 12 - legPhase * 4, this.radius + 1 - kneadOffset, 5, 4, 0, 0, Math.PI * 2);
           ctx.fill();
 
           // 身体
@@ -512,9 +579,13 @@
         ctx.restore();
       }
 
-      // 头部
+      // 头部 (融入蹭脸 headTilt 物理)
+      ctx.save();
       const headY = this.inBox ? 0 : (this.state === 'stalking' ? 0 : -8);
       const headR = this.radius * 0.76;
+      ctx.translate(0, headY);
+      ctx.rotate(this.headTilt);
+      ctx.translate(0, -headY);
 
       // 耳朵绘制
       ctx.fillStyle = this.breed.bodyColor;
@@ -644,6 +715,7 @@
 
       // 帽子 / 装扮
       this.drawHat(ctx, headY, headR);
+      ctx.restore(); // 恢复头部蹭脸旋转变换
 
       // 名字标签
       ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
