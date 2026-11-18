@@ -23,6 +23,8 @@
     WallPerch,
     WindowSill,
     SmartFeeder,
+    WaterMug,
+    WaterPuddle,
     BREEDS,
     PERSONALITIES
   } = window.CyberMeow;
@@ -112,6 +114,7 @@
       this.furniture.push(new SmartFeeder(1220, floorY));
       this.furniture.push(new Roomba(1480, floorY - 20));
       this.furniture.push(new WallPerch(1720, floorY - 220, 130, 16));
+      this.toys.push(new WaterMug(1730, floorY - 235)); // 跳台边缘水杯，等待被推落打翻！
       this.toys.push(new YarnBall(1620, floorY - 60));
 
       // --- 3. 右翼：极限运动游乐高塔 (Adventure Playground) ---

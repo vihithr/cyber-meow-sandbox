@@ -26,6 +26,15 @@
     }
 
     update(width, height) {
+      if (this.heldBy) {
+        // 如果被猫咪抱住疯狂蹬球，跟随猫咪胸前，不自行物理弹跳
+        this.x = this.heldBy.x + this.heldBy.facing * 12;
+        this.y = this.heldBy.y + 10;
+        this.vx = 0;
+        this.vy = 0;
+        return;
+      }
+
       const gravity = physicsWorld.getGravity();
       this.vy += gravity;
 
@@ -140,6 +149,15 @@
     }
 
     update(width, height) {
+      if (this.heldBy) {
+        // 如果被猫咪抱住疯狂蹬球，跟随猫咪胸前，不自行物理弹跳
+        this.x = this.heldBy.x + this.heldBy.facing * 12;
+        this.y = this.heldBy.y + 10;
+        this.vx = 0;
+        this.vy = 0;
+        return;
+      }
+
       const gravity = physicsWorld.getGravity();
       this.vy += gravity;
 
@@ -202,6 +220,15 @@
     }
 
     update(width, height) {
+      if (this.heldBy) {
+        // 如果被猫咪抱住疯狂蹬球，跟随猫咪胸前，不自行物理弹跳
+        this.x = this.heldBy.x + this.heldBy.facing * 12;
+        this.y = this.heldBy.y + 10;
+        this.vx = 0;
+        this.vy = 0;
+        return;
+      }
+
       const gravity = physicsWorld.getGravity();
       this.vy += gravity;
 
@@ -361,9 +388,132 @@
     }
   }
 
+  // 5. 马克水杯 (Water Mug) - 猫咪最渴望打翻的万恶之源
+  class WaterMug {
+    constructor(x, y) {
+      this.type = 'mug';
+      this.x = x;
+      this.y = y;
+      this.vx = 0;
+      this.vy = 0;
+      this.w = 22;
+      this.h = 28;
+      this.isBroken = false;
+    }
+
+    update(width, height, sceneContext) {
+      if (this.isBroken) return;
+      const gravity = physicsWorld.getGravity();
+      this.vy += gravity;
+      this.vx *= 0.94;
+      this.x += this.vx;
+      this.y += this.vy;
+
+      // 跳台与地面检测
+      const floor = physicsWorld.getFloorY(height) - this.h / 2;
+      if (this.y >= floor) {
+        this.y = floor;
+        // 高空坠地直接打翻摔碎，生成一滩水洼！
+        if (Math.abs(this.vy) > 3.5 || Math.abs(this.vx) > 1.0) {
+          this.spillWater(sceneContext, width, height);
+        } else {
+          this.vy = 0;
+        }
+      }
+    }
+
+    spillWater(sceneContext, width, height) {
+      if (this.isBroken) return;
+      this.isBroken = true;
+      if (window.CyberMeow.soundEngine) {
+        window.CyberMeow.soundEngine.playPop();
+      }
+      if (sceneContext && sceneContext.toys) {
+        sceneContext.toys.push(new WaterPuddle(this.x, physicsWorld.getFloorY(height) - 4));
+        if (sceneContext.spawnParticle) {
+          sceneContext.spawnParticle(this.x, this.y - 10, '💧💦');
+          sceneContext.spawnParticle(this.x + 10, this.y - 15, '🥛💥');
+        }
+      }
+    }
+
+    draw(ctx) {
+      if (this.isBroken) return;
+      ctx.save();
+      ctx.translate(this.x, this.y);
+
+      // 杯身
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.roundRect(-this.w / 2, -this.h / 2, this.w, this.h, [2, 2, 4, 4]);
+      ctx.fill();
+      ctx.strokeStyle = '#dfe4ea';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // 杯里的水
+      ctx.fillStyle = '#70a1ff';
+      ctx.fillRect(-this.w / 2 + 2, -this.h / 2 + 4, this.w - 4, this.h - 8);
+
+      // 把手
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(this.w / 2 + 3, 0, 6, -Math.PI * 0.4, Math.PI * 0.4);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+  }
+
+  // 6. 水洼与湿爪物理 (Water Puddle)
+  class WaterPuddle {
+    constructor(x, y) {
+      this.type = 'puddle';
+      this.x = x;
+      this.y = y;
+      this.w = 65;
+      this.h = 10;
+      this.life = 600; // 存续时间
+    }
+
+    update(width, height, sceneContext) {
+      this.life--;
+      // 扫地机路过拖出水痕
+      if (sceneContext && sceneContext.furniture) {
+        for (let f of sceneContext.furniture) {
+          if (f.type === 'roomba') {
+            if (Math.abs(f.x - this.x) < 40) {
+              this.w = Math.min(120, this.w + 0.4);
+            }
+          }
+        }
+      }
+    }
+
+    draw(ctx) {
+      if (this.life <= 0) return;
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      const alpha = Math.min(0.6, this.life / 200);
+
+      ctx.beginPath();
+      ctx.ellipse(0, 0, this.w / 2, this.h / 2, 0, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(112, 161, 255, ${alpha})`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(30, 144, 255, ${alpha * 0.8})`;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.restore();
+    }
+  }
+
   window.CyberMeow = window.CyberMeow || {};
   window.CyberMeow.YarnBall = YarnBall;
   window.CyberMeow.FishTreat = FishTreat;
   window.CyberMeow.CardboardBox = CardboardBox;
+  window.CyberMeow.WaterMug = WaterMug;
+  window.CyberMeow.WaterPuddle = WaterPuddle;
   window.CyberMeow.featherWand = new FeatherWand();
 })(window);

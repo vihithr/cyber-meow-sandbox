@@ -168,6 +168,7 @@
       }
 
       if (this.socialCooldown > 0) this.socialCooldown--;
+      if (this.yarnCooldown > 0) this.yarnCooldown--;
       if (this.overstimulation > 0) this.overstimulation -= 0.05;
       if (this.bubbleTimer > 0) this.bubbleTimer--;
 
@@ -342,9 +343,45 @@
         return;
       }
 
-      // 优先级2：纸箱中
+      // 优先级2：纸箱中 (具备突袭伏击路过者的猫性！)
       if (this.inBox) {
         this.state = 'in_box';
+        // 纸箱伏击 (Ambush): 伏击路过箱口的其他猫或扫地机
+        if (sceneContext.cats) {
+          for (let other of sceneContext.cats) {
+            if (other !== this && Math.hypot(other.x - this.x, other.y - this.y) < 48) {
+              if (Math.random() < 0.12 && other.state !== 'greebles') {
+                soundEngine.playSlap();
+                other.vy = -6.5; // 被伏击吓飞！
+                other.vx = (other.x > this.x ? 1 : -1) * 5;
+                this.speak('嗷呜！箱中伏击！📦💥');
+                other.speak('喵嗷！吓死朕了！🙀');
+                sceneContext.spawnParticle(this.x, this.y - 20, '🐾💥');
+                break;
+              }
+            }
+          }
+        }
+        return;
+      }
+
+      // 优先级2.5：抱毛线球疯狂兔子蹬 (Hug & Bunny Kick - 彻底解决在球上蹦跶)
+      if (this.state === 'hug_kick') {
+        this.bunnyKickPhase += 0.5;
+        this.vx = 0;
+        if (Math.random() < 0.25) soundEngine.playScratch();
+        if (this.stateTimer <= 0) {
+          if (this.heldYarn) {
+            this.heldYarn.heldBy = null;
+            this.heldYarn.vx = this.facing * (6.5 + Math.random() * 3);
+            this.heldYarn.vy = -4.5 - Math.random() * 2;
+            soundEngine.playBounce();
+            this.heldYarn = null;
+          }
+          this.state = 'idle';
+          this.stateTimer = 60;
+          this.speak('呼…蹬爽了！舔个毛~ ✨');
+        }
         return;
       }
 
@@ -575,6 +612,8 @@
           sceneContext.spawnParticle(this.x, this.y - 15, '🐾');
         }
       } else if (target.type === 'yarn') {
+        if (this.yarnCooldown > 0) return; // 冷却中，绝不重复扑球踩球！
+
         if (dist > 120) {
           this.state = 'stalking';
           this.vx += (dx / dist) * 0.4;
@@ -587,16 +626,16 @@
             this.vx = (dx / dist) * 7.2;
           }
         } else {
-          // 扑到了毛线！拍打并解脱激光挫败感
+          // 扑到了毛线！进入抱球疯狂兔子蹬 (Hug & Bunny Kick)，绝不再在球上弹跳！
           this.laserFrustration = 0;
-          if (target.obj) {
-            target.obj.vx += (this.vx + (Math.random() - 0.5) * 5) * 1.6;
-            target.obj.vy -= 4 + Math.random() * 2.5;
-            soundEngine.playBounce();
-            soundEngine.playMeow(this.pitchMod * 1.2, 'chirp');
-            sceneContext.spawnParticle(this.x, this.y - 20, '🧶✨');
-            this.speak('喵喵连环掌！');
-          }
+          this.state = 'hug_kick';
+          this.stateTimer = 55;
+          this.heldYarn = target.obj;
+          target.obj.heldBy = this;
+          this.yarnCooldown = 180; // 冷却期 3 秒
+          soundEngine.playScratch();
+          soundEngine.playMeow(this.pitchMod * 1.2, 'chirp');
+          this.speak('抱住狂蹬！看我兔子腿！🐾');
         }
       } else if (target.type === 'feather') {
         if (dist > 35) {
@@ -731,11 +770,11 @@
       return false;
     }
 
-    // 高台贱爪推物检查 (Knocking things off)
+    // 高台贱爪推物检查 (Knocking things off - 包含毛线、小鱼干与马克水杯！)
     checkHighPerchSwat(sceneContext) {
       if (!sceneContext.toys) return false;
       for (let t of sceneContext.toys) {
-        if (t.type === 'yarn' || t.type === 'fish') {
+        if (t.type === 'yarn' || t.type === 'fish' || t.type === 'mug') {
           const dx = t.x - this.x;
           const dy = t.y - this.y;
           // 物体在跳台台面上且距离很近
