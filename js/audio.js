@@ -258,6 +258,101 @@
       noise.start(now);
     }
 
+    // --- 猫咪哈气警告 (Hissing) ---
+    playHiss() {
+      if (this.isMuted) return;
+      this.init();
+      const now = this.ctx.currentTime;
+      const dur = 0.35;
+      const buffer = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * dur), this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) {
+        data[i] = (Math.random() * 2 - 1) * (1 - i / data.length * 0.6);
+      }
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.setValueAtTime(3200, now);
+      filter.frequency.exponentialRampToValueAtTime(1800, now + dur);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.01, now);
+      gain.gain.linearRampToValueAtTime(0.18, now + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.sfxGain);
+      noise.start(now);
+    }
+
+    // --- 喵喵拳互拍 (Cat Slap) ---
+    playSlap() {
+      if (this.isMuted) return;
+      this.init();
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(280, now);
+      osc.frequency.exponentialRampToValueAtTime(60, now + 0.08);
+
+      gain.gain.setValueAtTime(0.26, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now);
+      osc.stop(now + 0.1);
+    }
+
+    // --- 观鸟捕食快速齿颤声 (Chattering) ---
+    playChatter(pitchMod = 1.0) {
+      if (this.isMuted) return;
+      this.init();
+      const now = this.ctx.currentTime;
+      const clicks = 5 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < clicks; i++) {
+        const t = now + i * 0.045;
+        const osc = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime((900 + Math.random() * 200) * pitchMod, t);
+        osc.frequency.exponentialRampToValueAtTime(350 * pitchMod, t + 0.03);
+        g.gain.setValueAtTime(0.001, t);
+        g.gain.linearRampToValueAtTime(0.15, t + 0.008);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.038);
+        osc.connect(g);
+        g.connect(this.sfxGain);
+        osc.start(t);
+        osc.stop(t + 0.04);
+      }
+    }
+
+    // --- 窗外小鸟啁啾声 (Bird Tweet) ---
+    playBirdTweet() {
+      if (this.isMuted) return;
+      this.init();
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(2400, now);
+      osc.frequency.exponentialRampToValueAtTime(3800, now + 0.07);
+      osc.frequency.exponentialRampToValueAtTime(2600, now + 0.16);
+
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.08, now + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now);
+      osc.stop(now + 0.2);
+    }
+
     // --- 扫地机器人马达嗡嗡声 ---
     startRoomba() {
       if (this.isMuted || this.roombaOsc) return;

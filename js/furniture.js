@@ -71,7 +71,17 @@
       this.y = y;
       this.w = w;
       this.h = h;
-      this.birds = [{ x: -20, y: 30, vx: 1.2, flap: 0 }];
+      this.birds = [{ x: -20, y: 30, vx: 1.2, flap: 0, tweetTimer: 180 }];
+    }
+
+    getBirdWorldPos() {
+      if (this.birds.length === 0) return null;
+      const b = this.birds[0];
+      return {
+        x: this.x - this.w / 2 + b.x,
+        y: this.y - this.h / 2 + b.y,
+        active: b.x > 0 && b.x < this.w
+      };
     }
 
     update(width, height) {
@@ -79,6 +89,14 @@
       this.birds.forEach(b => {
         b.x += b.vx;
         b.flap += 0.25;
+        if (b.tweetTimer > 0) b.tweetTimer--;
+        if (b.tweetTimer <= 0 && b.x > 20 && b.x < this.w - 20) {
+          if (window.CyberMeow.soundEngine && Math.random() < 0.4) {
+            window.CyberMeow.soundEngine.playBirdTweet();
+          }
+          b.tweetTimer = 220 + Math.random() * 260;
+        }
+
         if (b.x > this.w + 40) {
           b.x = -40;
           b.y = 20 + Math.random() * (this.h - 50);
@@ -164,7 +182,7 @@
       this.ledPhase = 0;
     }
 
-    update(width, height) {
+    update(width, height, sceneContext) {
       const gravity = physicsWorld.getGravity();
       this.vy += gravity;
 
@@ -187,6 +205,26 @@
         this.x = width - this.radius - 15;
         this.vx = -Math.abs(this.vx);
         this.bump();
+      }
+
+      // 物理推力碰撞：撞击推开挡路的毛线球与纸箱！
+      if (sceneContext && sceneContext.toys) {
+        for (let t of sceneContext.toys) {
+          const dx = t.x - this.x;
+          const dy = t.y - this.y;
+          const dist = Math.hypot(dx, dy);
+          const minD = this.radius + (t.radius || t.w / 2 || 15);
+          if (dist < minD && dist > 1) {
+            // 将道具弹开推走！
+            const pushForce = Math.sign(this.vx) * 3.5;
+            t.vx += pushForce;
+            t.vy -= 1.8;
+            this.bump();
+            if (t.type === 'yarn' && window.CyberMeow.soundEngine) {
+              window.CyberMeow.soundEngine.playBounce();
+            }
+          }
+        }
       }
 
       // 乘客猫咪
@@ -397,14 +435,19 @@
   class Sunbeam {
     constructor(x, y, w = 190) {
       this.type = 'sunbeam';
+      this.baseX = x;
       this.x = x;
       this.y = y;
       this.width = w;
       this.pulse = 0;
+      this.driftPhase = 0;
     }
 
     update(width, height) {
       this.pulse += 0.02;
+      this.driftPhase += 0.003;
+      // 阳光随白昼慢速横向平移，吸引打盹猫咪追随暖光
+      this.x = this.baseX + Math.sin(this.driftPhase) * 75;
     }
 
     draw(ctx, height) {

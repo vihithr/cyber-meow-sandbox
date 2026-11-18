@@ -520,16 +520,16 @@
         this.sunbeam.draw(ctx, height);
       }
 
-      // 3. 家具更新与绘制
+      // 3. 家具更新与绘制 (支持扫地机物理推撞)
       for (let f of this.furniture) {
-        f.update(width, height);
+        f.update(width, height, this);
         f.draw(ctx);
       }
 
       // 4. 玩具更新与绘制
       for (let i = this.toys.length - 1; i >= 0; i--) {
         const t = this.toys[i];
-        t.update(width, height);
+        t.update(width, height, this);
         t.draw(ctx);
       }
 

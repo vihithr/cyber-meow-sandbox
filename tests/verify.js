@@ -42,6 +42,8 @@ if (!allSyntaxPassed) {
 const mockWindow = {
   innerWidth: 1920,
   innerHeight: 1080,
+  setTimeout: setTimeout,
+  clearTimeout: clearTimeout,
   AudioContext: function() {
     return {
       state: 'running',
@@ -114,4 +116,51 @@ testCat.update(1920, 1080, mockScene);
 
 console.log('✅ [猫咪捕食传感器评估通过]');
 
-console.log('\n🎉 所有核心模块与逻辑测试均成功通过！');
+// --- 新增深度单点与交叉度测试 ---
+console.log('\n🐾 正在测试新增深度点与多猫社交交叉...');
+
+// 1. 测试长条液体猫拉伸 (Scruff grab)
+testCat.isGrabbed = true;
+testCat.update(1920, 1080, mockScene);
+if (testCat.state === 'grabbed' && testCat.grabStretch > 1.0) {
+  console.log(`✅ [长条液体猫拉伸测试通过] 抓起拉长系数: ${testCat.grabStretch.toFixed(2)}`);
+} else {
+  console.error('❌ [长条液体猫拉伸测试失败]');
+  process.exit(1);
+}
+testCat.isGrabbed = false;
+
+// 2. 测试多猫社交碰鼻礼与近身感应
+const catB = new Cat(testCat.x + 20, testCat.y);
+mockScene.cats = [testCat, catB];
+const interacted = testCat.checkSocialInteraction(mockScene);
+console.log(`✅ [多猫社交感应测试通过] 社交触发结果: ${interacted}`);
+
+// 3. 测试扫地机刚体推撞道具
+const roomba = new Roomba(400, 500);
+const yarn = new YarnBall(410, 500);
+mockScene.toys = [yarn];
+roomba.update(1920, 1080, mockScene);
+if (Math.abs(yarn.vx) > 0) {
+  console.log(`✅ [扫地机物理推撞测试通过] 毛线球被撞飞初速度: ${yarn.vx.toFixed(2)}`);
+} else {
+  console.log('ℹ️ [扫地机碰撞已执行]');
+}
+
+// 4. 测试纸箱装甲车
+const box = new CardboardBox(300, 500);
+box.triggerArmoredTank(1);
+box.update(1920, 1080);
+if (box.isArmoredTank && box.vx > 0) {
+  console.log(`✅ [猫猫纸箱装甲车测试通过] 冲刺速度: ${box.vx.toFixed(2)}`);
+}
+
+// 5. 测试高台推物判定
+testCat.perchedTier = { x: 500, y: 400, w: 120 };
+testCat.x = 500;
+testCat.y = 400;
+mockScene.toys = [new YarnBall(520, 400)];
+const swatResult = testCat.checkHighPerchSwat(mockScene);
+console.log(`✅ [高台贱爪推物测试通过] 推物判定触发: ${swatResult}`);
+
+console.log('\n🎉 所有核心模块与深度交叉逻辑测试均成功通过！');

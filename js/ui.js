@@ -372,12 +372,20 @@
       this.studioParticles = [];
       this.studioPurrTimer = 0;
       this.studioTongueOut = 0;
+      this.studioPatience = 100;
+      this.studioCollectedFur = 0;
+      this.studioBiteCooldown = 0;
+      this.studioScreenShake = 0;
 
       const modal = document.getElementById('studio-modal');
       const title = document.getElementById('studio-cat-name');
+      const furBanner = document.getElementById('studio-fur-banner');
       if (!modal) return;
 
       if (title) title.innerText = `与「${cat.name}」的亲密时光 🐾`;
+      if (furBanner) furBanner.style.display = 'none';
+
+      this.updateStudioPatienceUI();
       modal.classList.add('open');
 
       soundEngine.playMeow(cat.pitchMod, 'pleading');
@@ -391,6 +399,29 @@
       this.studioCat = null;
       cancelAnimationFrame(this.studioAnimId);
       soundEngine.stopPurr();
+    }
+
+    updateStudioPatienceUI() {
+      const bar = document.getElementById('studio-patience-bar');
+      const tag = document.getElementById('studio-mood-tag');
+      if (!bar || !tag) return;
+
+      const pct = Math.max(0, Math.min(100, this.studioPatience));
+      bar.style.width = pct + '%';
+
+      if (pct > 65) {
+        bar.style.background = '#2ed573';
+        tag.innerText = '🥰 极度舒适';
+        tag.style.color = '#2ed573';
+      } else if (pct > 25) {
+        bar.style.background = '#ffa502';
+        tag.innerText = '⚠️ 尾巴微甩，注意别一直摸肚皮';
+        tag.style.color = '#ffa502';
+      } else {
+        bar.style.background = '#ff4757';
+        tag.innerText = '😾 飞机耳！随时亮爪抱咬！';
+        tag.style.color = '#ff4757';
+      }
     }
 
     setStudioTool(tool) {
@@ -414,6 +445,25 @@
           if (btn.dataset.tool) this.setStudioTool(btn.dataset.tool);
         };
       });
+
+      // 绑定浮毛搓成毛球扔回场景事件
+      const tossFurBtn = document.getElementById('btn-toss-fur-ball');
+      if (tossFurBtn) {
+        tossFurBtn.onclick = () => {
+          if (!this.studioCat) return;
+          const cat = this.studioCat;
+          const app = window.CyberMeow.app;
+          if (app && app.toys) {
+            const YarnBallClass = window.CyberMeow.YarnBall;
+            const newBall = new YarnBallClass(cat.x + 15, cat.y - 30, 13, cat.breed.bodyColor);
+            app.toys.push(newBall);
+            soundEngine.playBounce();
+            this.showToast(`🧶 用「${cat.name}」梳下的浮毛搓成了专属毛球！已投掷进房间！`, 4000);
+            cat.speak('咦！我的毛球！');
+          }
+          this.closeCloseUpStudio();
+        };
+      }
 
       const canvas = document.getElementById('studio-canvas');
       if (!canvas) return;
@@ -454,14 +504,49 @@
 
     interactStudio(x, y) {
       if (!this.studioCat) return;
-      const cat = this.studioCat;
+      if (this.studioBiteCooldown > 0) return; // 被咬后的傲娇冷却期
 
+      const cat = this.studioCat;
+      const isBellyZone = y > 140; // 肚皮禁区判定！
+
+      if (isBellyZone && this.studioTool !== 'churu') {
+        // 摸肚皮：高风险高过载！
+        this.studioPatience -= 24;
+        this.updateStudioPatienceUI();
+
+        if (this.studioPatience <= 0) {
+          // 触发过载反击！
+          this.triggerStudioLoveBite();
+          return;
+        } else {
+          soundEngine.playHiss();
+          this.studioParticles.push({
+            x, y,
+            vx: (Math.random() - 0.5) * 1.5,
+            vy: -1.5,
+            text: '⚡',
+            alpha: 1.0
+          });
+          return;
+        }
+      }
+
+      // 处于安全舒适区 (头顶、耳后、下巴)
       if (this.studioTool === 'brush') {
         // 舒爽梳毛
         soundEngine.playScratch();
         soundEngine.startPurr();
         cat.affection = Math.min(100, cat.affection + 2);
-        this.studioPurrTimer = 40;
+        this.studioPurrTimer = 45;
+        this.studioPatience = Math.min(100, this.studioPatience + 3);
+        this.updateStudioPatienceUI();
+
+        // 浮毛收集积累
+        this.studioCollectedFur++;
+        if (this.studioCollectedFur >= 12) {
+          const banner = document.getElementById('studio-fur-banner');
+          if (banner) banner.style.display = 'flex';
+        }
 
         // 浮毛飘舞粒子
         for (let i = 0; i < 3; i++) {
@@ -479,7 +564,9 @@
         // 挠挠下巴
         soundEngine.startPurr();
         cat.affection = Math.min(100, cat.affection + 3);
-        this.studioPurrTimer = 50;
+        this.studioPurrTimer = 55;
+        this.studioPatience = Math.min(100, this.studioPatience + 6);
+        this.updateStudioPatienceUI();
 
         this.studioParticles.push({
           x: x + (Math.random() - 0.5) * 20,
@@ -495,6 +582,8 @@
         soundEngine.playCrunch();
         cat.hunger = Math.min(100, cat.hunger + 8);
         this.studioTongueOut = 30;
+        this.studioPatience = Math.min(100, this.studioPatience + 4);
+        this.updateStudioPatienceUI();
 
         this.studioParticles.push({
           x, y,
@@ -505,6 +594,32 @@
           scale: 1.0
         });
       }
+    }
+
+    triggerStudioLoveBite() {
+      this.studioBiteCooldown = 120; // 冷却
+      this.studioScreenShake = 16;
+      soundEngine.stopPurr();
+      soundEngine.playSlap();
+      soundEngine.playHiss();
+
+      // 抱咬受惊粒子
+      for (let i = 0; i < 8; i++) {
+        this.studioParticles.push({
+          x: 190 + (Math.random() - 0.5) * 60,
+          y: 130 + (Math.random() - 0.5) * 40,
+          vx: (Math.random() - 0.5) * 3,
+          vy: -2 - Math.random() * 2,
+          text: '💥',
+          alpha: 1.0
+        });
+      }
+
+      this.showToast('⚠️ 猫咪过载抱咬！「嗷呜一口轻咬了你的手指！」傲娇走神中…', 4000);
+      setTimeout(() => {
+        this.studioPatience = 70;
+        this.updateStudioPatienceUI();
+      }, 2500);
     }
 
     startStudioAnimation() {
@@ -541,9 +656,19 @@
 
         // 2. 猫咪大特写绘制 (居中坐姿，大头呆萌)
         ctx.save();
-        ctx.translate(w / 2, h - 90);
+        let shakeX = 0, shakeY = 0;
+        if (this.studioScreenShake > 0) {
+          shakeX = (Math.random() - 0.5) * this.studioScreenShake;
+          shakeY = (Math.random() - 0.5) * this.studioScreenShake;
+          this.studioScreenShake *= 0.88;
+          if (this.studioScreenShake < 0.5) this.studioScreenShake = 0;
+        }
+        if (this.studioBiteCooldown > 0) this.studioBiteCooldown--;
+
+        ctx.translate(w / 2 + shakeX, h - 90 + shakeY);
         const breath = Math.sin(Date.now() * 0.004) * 2;
         const isHappy = this.studioPurrTimer > 0;
+        const isAngry = this.studioBiteCooldown > 60 || this.studioPatience < 25;
         if (this.studioPurrTimer > 0) this.studioPurrTimer--;
         if (this.studioTongueOut > 0) this.studioTongueOut--;
 
@@ -563,10 +688,9 @@
         const headR = 46;
         const headY = -18 + breath * 0.5;
 
-        // 耳朵
+        // 耳朵 (舒服时微撇，过载生气时成愤怒飞机耳)
         ctx.fillStyle = cat.breed.bodyColor;
-        // 左耳 (舒服时飞机耳轻微外撇)
-        const earSplay = isHappy ? 0.2 : 0;
+        const earSplay = isAngry ? 0.65 : (isHappy ? 0.2 : 0);
         ctx.save();
         ctx.rotate(-earSplay);
         ctx.beginPath();
@@ -605,8 +729,21 @@
         ctx.fillStyle = cat.breed.bodyColor;
         ctx.fill();
 
-        // 眼睛 (舒服被抚摸时闭眼眯眯笑)
-        if (isHappy) {
+        // 眼睛 (舒服眯眼 / 愤怒竖瞳 / 正常大圆眼)
+        if (isAngry) {
+          // 生气过载：细长竖瞳
+          ctx.fillStyle = cat.breed.eyeColor;
+          ctx.beginPath();
+          ctx.ellipse(-headR * 0.4, headY - 3, 7, 10, -0.15, 0, Math.PI * 2);
+          ctx.ellipse(headR * 0.4, headY - 3, 7, 10, 0.15, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = '#111';
+          ctx.beginPath();
+          ctx.ellipse(-headR * 0.4, headY - 3, 2, 8.5, 0, 0, Math.PI * 2);
+          ctx.ellipse(headR * 0.4, headY - 3, 2, 8.5, 0, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (isHappy) {
           ctx.strokeStyle = '#2d3436';
           ctx.lineWidth = 3.5;
           ctx.beginPath();

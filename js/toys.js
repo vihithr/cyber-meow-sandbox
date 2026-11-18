@@ -7,19 +7,22 @@
 
   const { MathUtils, VerletChain, physicsWorld } = window.CyberMeow;
 
-  // 1. 弹性毛线球 (带小线头拖尾)
+  // 1. 弹性毛线球 (带解体散线与缠绕物理)
   class YarnBall {
-    constructor(x, y) {
+    constructor(x, y, customRadius = 16, customColor = null) {
       this.type = 'yarn';
       this.x = x;
       this.y = y;
       this.vx = (Math.random() - 0.5) * 5;
       this.vy = -3.5;
-      this.radius = 15;
+      this.radius = customRadius;
+      this.initialRadius = customRadius;
       this.rotation = 0;
       this.vRot = (Math.random() - 0.5) * 0.2;
-      this.color = ['#ff4757', '#2ed573', '#1e90ff', '#ffa502', '#9b59b6', '#ff6b81'][Math.floor(Math.random() * 6)];
+      this.color = customColor || ['#ff4757', '#2ed573', '#1e90ff', '#ffa502', '#9b59b6', '#ff6b81'][Math.floor(Math.random() * 6)];
       this.trail = [];
+      this.looseThreads = []; // 散落在地面上的毛线节段
+      this.dropThreadCooldown = 0;
     }
 
     update(width, height) {
@@ -36,7 +39,21 @@
       // 拖尾记录
       if (Math.hypot(this.vx, this.vy) > 0.4) {
         this.trail.unshift({ x: this.x, y: this.y, alpha: 0.6 });
-        if (this.trail.length > 12) this.trail.pop();
+        if (this.trail.length > 14) this.trail.pop();
+      }
+
+      // 快速滚动时在地面留下散落的毛线段 (解体感)
+      if (this.dropThreadCooldown > 0) this.dropThreadCooldown--;
+      if (Math.abs(this.vx) > 2.5 && this.dropThreadCooldown === 0 && this.radius > 10) {
+        this.looseThreads.push({
+          x: this.x,
+          y: this.y + this.radius - 2,
+          w: 12 + Math.random() * 16,
+          h: (Math.random() - 0.5) * 8
+        });
+        if (this.looseThreads.length > 12) this.looseThreads.shift();
+        this.radius = Math.max(10, this.radius - 0.15); // 轻微缩减
+        this.dropThreadCooldown = 25;
       }
 
       // 地面与边界碰撞
@@ -60,10 +77,23 @@
     draw(ctx) {
       ctx.save();
 
-      // 拖尾毛线
+      // 绘制散落在地上的毛线段
+      if (this.looseThreads.length > 0) {
+        ctx.strokeStyle = this.color;
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        this.looseThreads.forEach(t => {
+          ctx.beginPath();
+          ctx.moveTo(t.x, t.y);
+          ctx.quadraticCurveTo(t.x + t.w * 0.5, t.y + t.h, t.x + t.w, t.y);
+          ctx.stroke();
+        });
+      }
+
+      // 运动毛线拖尾
       if (this.trail.length > 1) {
         ctx.strokeStyle = this.color;
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 2.8;
         ctx.beginPath();
         ctx.moveTo(this.trail[0].x, this.trail[0].y);
         for (let i = 1; i < this.trail.length; i++) {
@@ -141,7 +171,7 @@
     }
   }
 
-  // 3. 经典纸箱 (Cardboard Box)
+  // 3. 经典纸箱 (Cardboard Box - 支持胖猫卡屁股与猫猫装甲车)
   class CardboardBox {
     constructor(x, y) {
       this.type = 'box';
@@ -152,13 +182,40 @@
       this.w = 58;
       this.h = 38;
       this.occupant = null;
+      this.wigglePhase = 0;
+      this.isArmoredTank = false;
+      this.tankTimer = 0;
+      this.scratches = [
+        { x: -14, y: -4, len: 10, ang: 0.3 },
+        { x: -10, y: -2, len: 12, ang: 0.4 },
+        { x: 12, y: 6, len: 9, ang: -0.2 }
+      ];
+    }
+
+    triggerArmoredTank(dir = 1) {
+      this.isArmoredTank = true;
+      this.tankTimer = 90;
+      this.vx = dir * 4.5;
+      if (window.CyberMeow.soundEngine) {
+        window.CyberMeow.soundEngine.playMeow(1.2, 'chatter');
+      }
     }
 
     update(width, height) {
       const gravity = physicsWorld.getGravity();
       this.vy += gravity;
 
-      this.vx *= 0.88;
+      if (this.isArmoredTank) {
+        this.tankTimer--;
+        this.wigglePhase += 0.4;
+        if (this.tankTimer <= 0) {
+          this.isArmoredTank = false;
+        }
+      } else {
+        this.wigglePhase = 0;
+      }
+
+      this.vx *= this.isArmoredTank ? 0.96 : 0.88;
       this.vy *= 0.98;
 
       this.x += this.vx;
@@ -169,8 +226,14 @@
         this.y = floor;
         this.vy = 0;
       }
-      if (this.x < this.w / 2 + 10) { this.x = this.w / 2 + 10; this.vx = 0; }
-      if (this.x > width - this.w / 2 - 10) { this.x = width - this.w / 2 - 10; this.vx = 0; }
+      if (this.x < this.w / 2 + 10) {
+        this.x = this.w / 2 + 10;
+        this.vx = -this.vx * 0.8;
+      }
+      if (this.x > width - this.w / 2 - 10) {
+        this.x = width - this.w / 2 - 10;
+        this.vx = -this.vx * 0.8;
+      }
 
       // 验证在箱子里的猫咪是否依然有效
       if (this.occupant && this.occupant.inBox !== this) {
@@ -182,7 +245,12 @@
       ctx.save();
       ctx.translate(this.x, this.y);
 
-      // 箱子底色
+      // 装甲车开动时纸箱轻微颠簸
+      if (this.isArmoredTank) {
+        ctx.rotate(Math.sin(this.wigglePhase) * 0.08);
+      }
+
+      // 纸箱底色
       ctx.fillStyle = '#b7791f';
       ctx.beginPath();
       ctx.roundRect(-this.w / 2, -this.h / 2, this.w, this.h, [4]);
@@ -193,17 +261,28 @@
       ctx.lineWidth = 2;
       ctx.stroke();
 
+      // 猫咪抓咬抓痕
+      ctx.strokeStyle = 'rgba(74, 44, 15, 0.55)';
+      ctx.lineWidth = 1.2;
+      this.scratches.forEach(s => {
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(s.x + Math.cos(s.ang) * s.len, s.y + Math.sin(s.ang) * s.len);
+        ctx.stroke();
+      });
+
       // 纸箱封口缝隙
+      ctx.strokeStyle = '#8c5011';
       ctx.beginPath();
       ctx.moveTo(-this.w / 2, 0);
       ctx.lineTo(this.w / 2, 0);
       ctx.stroke();
 
       // 文字
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
-      ctx.font = '10px monospace';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.font = 'bold 9px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('📦 AMAZON', 0, 12);
+      ctx.fillText(this.isArmoredTank ? '🚀 TANK BOX' : '📦 AMAZON', 0, 12);
 
       ctx.restore();
     }

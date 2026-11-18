@@ -125,14 +125,31 @@
         <h3 id="studio-cat-name">🐾 亲密侍奉时光</h3>
         <button class="btn-close" id="btn-close-studio">&times;</button>
       </div>
+
+      <!-- 猫咪心理耐心与过载警戒条 -->
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 6px; margin-bottom: 4px; font-size: 0.75rem; color: #ced6e0;">
+        <span>猫咪耐心值 (连摸肚皮会过载):</span>
+        <span id="studio-mood-tag" style="color: #2ed573; font-weight: bold;">🥰 极度舒适</span>
+      </div>
+      <div class="metric-track" style="margin-bottom: 8px; height: 6px;">
+        <div class="metric-fill" id="studio-patience-bar" style="width: 100%; background: #2ed573;"></div>
+      </div>
+
       <canvas id="studio-canvas" width="380" height="240"></canvas>
       <div class="studio-actions-bar">
         <button class="studio-tool-btn active" data-tool="brush">🪮 舒爽梳毛</button>
         <button class="studio-tool-btn" data-tool="chin">🖐️ 挠挠下巴</button>
         <button class="studio-tool-btn" data-tool="churu">🐟 撕开猫条</button>
       </div>
-      <div style="font-size: 0.8rem; color: #a4b0be; margin-top: 10px;">
-        💡 提示：在猫咪身上按住轻柔滑动，享受沉浸式呼噜声与浮毛飞舞~
+
+      <!-- 浮毛搓成毛球彩蛋横幅 -->
+      <div id="studio-fur-banner" style="display: none; background: rgba(254, 202, 87, 0.2); border: 1px dashed #feca57; padding: 6px 10px; border-radius: 8px; margin-top: 8px; justify-content: space-between; align-items: center;">
+        <span style="font-size: 0.8rem; color: #feca57;">✨ 收集的浮毛搓成了专属毛球！</span>
+        <button class="pill-btn active" id="btn-toss-fur-ball" style="padding: 3px 8px; font-size: 0.75rem;">扔回房间 🧶</button>
+      </div>
+
+      <div style="font-size: 0.75rem; color: #a4b0be; margin-top: 8px;">
+        💡 提示：头颈下巴是安全区；若一直摸肚皮会触发「猫咪过载抱咬反击」！
       </div>
     </div>
   </div>
