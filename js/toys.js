@@ -47,7 +47,7 @@
 
       // 拖尾记录
       if (Math.hypot(this.vx, this.vy) > 0.4) {
-        this.trail.unshift({ x: this.x, y: this.y, alpha: 0.6 });
+        this.trail.unshift({ x: this.x, y: this.y });
         if (this.trail.length > 14) this.trail.pop();
       }
 
@@ -429,6 +429,10 @@
       this.x += this.vx;
       this.y += this.vy;
 
+      // 水平边界：避免被打翻后飞出豪宅，导致水洼生成在世界之外
+      if (this.x < this.w / 2) { this.x = this.w / 2; this.vx = -this.vx * 0.5; }
+      if (this.x > width - this.w / 2) { this.x = width - this.w / 2; this.vx = -this.vx * 0.5; }
+
       // 摇晃阻尼
       this.wobbleAngle *= 0.91;
 
@@ -440,7 +444,9 @@
         if (Math.abs(this.vy) > 3.0 || Math.abs(this.vx) > 0.8) {
           this.spillWater(sceneContext, width, height);
         } else {
+          // 未碎裂时一并清零水平速度，避免杯子持续滑行并反复触发落地判定
           this.vy = 0;
+          this.vx = 0;
         }
       }
     }
@@ -507,6 +513,11 @@
 
     contains(px, py) {
       return this.life > 0 && Math.abs(px - this.x) < this.w / 2 + 10 && Math.abs(py - this.y) < 22;
+    }
+
+    // 供主循环回收：生命周期结束后从 toys 数组移除，避免只增不减
+    isExpired() {
+      return this.life <= 0;
     }
 
     update(width, height, sceneContext) {

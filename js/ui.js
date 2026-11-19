@@ -6,15 +6,21 @@
   'use strict';
 
   const { soundEngine, HATS } = window.CyberMeow;
+  const CHALLENGE_DURATION = 45;
 
   class UIManager {
     constructor() {
       this.selectedCat = null;
       this.challengeActive = false;
-      this.challengeTime = 45;
+      this.challengeTime = CHALLENGE_DURATION;
       this.challengeScore = 0;
       this.challengeTimer = null;
       this.targetStar = null;
+      this.prevTool = null;
+      this.biteRecoverTimer = null;
+      this.studioCat = null;
+      this.studioAnimId = null;
+      this.toastTimer = null;
     }
 
     init() {
@@ -44,7 +50,7 @@
       const personalityTitle = document.getElementById('cat-personality-title');
       const personalityDesc = document.getElementById('cat-personality-desc');
 
-      if (!modal || !nameInput) return;
+      if (!modal || !nameInput || !breedEl || !personalityTitle || !personalityDesc) return;
 
       nameInput.value = cat.name;
       breedEl.innerText = cat.breed.name;
@@ -229,7 +235,13 @@
       const dateStr = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
       sctx.fillText(dateStr, snapCanvas.width - pad - 160, snapCanvas.height - 30);
 
-      const dataUrl = snapCanvas.toDataURL('image/png');
+      let dataUrl;
+      try {
+        dataUrl = snapCanvas.toDataURL('image/png');
+      } catch (e) {
+        this.showToast('📸 快照生成失败，请稍后重试');
+        return;
+      }
       const modal = document.getElementById('snapshot-modal');
       const img = document.getElementById('snapshot-img');
       const downloadBtn = document.getElementById('btn-download-snap');
@@ -251,7 +263,8 @@
       const closeBtn = document.getElementById('btn-close-snapshot');
       if (closeBtn) {
         closeBtn.onclick = () => {
-          document.getElementById('snapshot-modal').classList.remove('open');
+          const modal = document.getElementById('snapshot-modal');
+          if (modal) modal.classList.remove('open');
         };
       }
     }
@@ -267,8 +280,10 @@
 
     startLaserChallenge(sceneContext) {
       this.challengeActive = true;
-      this.challengeTime = 40;
+      this.challengeTime = CHALLENGE_DURATION;
       this.challengeScore = 0;
+      // 记录进入挑战前的工具，结束时恢复，避免玩家被困在激光笔模式
+      this.prevTool = sceneContext ? sceneContext.currentTool : null;
       const hud = document.getElementById('challenge-hud');
       if (hud) hud.style.display = 'flex';
 
@@ -294,12 +309,21 @@
     }
 
     spawnNextTarget(sceneContext) {
+      // 星星绘制在「世界坐标系」内，必须按当前相机与缩放换算可见范围，
+      // 否则镜头平移到客厅/高塔后星星会出现在屏幕外
       const margin = 100;
-      const w = window.innerWidth;
-      const h = window.innerHeight;
+      const zoom = (sceneContext && sceneContext.zoom > 0) ? sceneContext.zoom : 1;
+      const viewW = (sceneContext && sceneContext.viewportWidth) || window.innerWidth;
+      const viewH = (sceneContext && sceneContext.viewportHeight) || window.innerHeight;
+      const camX = sceneContext ? sceneContext.cameraX : 0;
+      const worldW = (sceneContext && sceneContext.worldWidth) || viewW;
+      const x0 = Math.max(margin, camX + margin / zoom);
+      const x1 = Math.min(worldW - margin, camX + (viewW - margin) / zoom);
+      const y0 = margin / zoom;
+      const y1 = (viewH - margin) / zoom;
       this.targetStar = {
-        x: margin + Math.random() * (w - margin * 2),
-        y: margin + Math.random() * (h - margin * 2),
+        x: x0 + Math.random() * Math.max(1, x1 - x0),
+        y: y0 + Math.random() * Math.max(1, y1 - y0),
         radius: 22,
         pulse: 0
       };
@@ -360,13 +384,21 @@
     stopLaserChallenge() {
       this.challengeActive = false;
       clearInterval(this.challengeTimer);
+      this.challengeTimer = null;
       this.targetStar = null;
+      if (this.prevTool && window.CyberMeow.setTool) {
+        window.CyberMeow.setTool(this.prevTool);
+        this.prevTool = null;
+      }
       const hud = document.getElementById('challenge-hud');
       if (hud) hud.style.display = 'none';
     }
 
     // --- 抱入怀中·桌面特写侍奉台 (Close-up Care Studio) ---
     openCloseUpStudio(cat) {
+      // 清理上一次会话遗留的抱咬恢复定时器，避免改写新会话的耐心值
+      clearTimeout(this.biteRecoverTimer);
+      this.biteRecoverTimer = null;
       this.studioCat = cat;
       this.studioTool = 'brush';
       this.studioParticles = [];
@@ -397,8 +429,12 @@
       const modal = document.getElementById('studio-modal');
       if (modal) modal.classList.remove('open');
       this.studioCat = null;
+      clearTimeout(this.biteRecoverTimer);
+      this.biteRecoverTimer = null;
       cancelAnimationFrame(this.studioAnimId);
       soundEngine.stopPurr();
+      // 侍奉台里改变的亲密度/饱腹度在关闭时统一落盘，避免每次交互都写 localStorage
+      if (window.CyberMeow.saveState) window.CyberMeow.saveState();
     }
 
     updateStudioPatienceUI() {
@@ -616,7 +652,9 @@
       }
 
       this.showToast('⚠️ 猫咪过载抱咬！「嗷呜一口轻咬了你的手指！」傲娇走神中…', 4000);
-      setTimeout(() => {
+      clearTimeout(this.biteRecoverTimer);
+      this.biteRecoverTimer = setTimeout(() => {
+        if (!this.studioCat) return;
         this.studioPatience = 70;
         this.updateStudioPatienceUI();
       }, 2500);
@@ -627,11 +665,17 @@
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
 
+      // 画布尺寸只在初始化时设置；写 width/height 会清空缓冲并重置上下文，不能每帧执行
+      if (canvas.width !== 380) canvas.width = 380;
+      if (canvas.height !== 240) canvas.height = 240;
+      // 快速反复打开侍奉台时，先取消上一轮循环，避免两个 rAF 同时写同一画布
+      cancelAnimationFrame(this.studioAnimId);
+
       const render = () => {
         if (!this.studioCat) return;
         const cat = this.studioCat;
-        const w = canvas.width = 380;
-        const h = canvas.height = 240;
+        const w = 380;
+        const h = 240;
 
         ctx.clearRect(0, 0, w, h);
 

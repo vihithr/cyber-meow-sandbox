@@ -6,6 +6,7 @@
   'use strict';
 
   const { MathUtils, physicsWorld } = window.CyberMeow;
+  const FEATHER_COLORS = ['#fd79a8', '#a29bfe', '#ffeaa7'];
 
   // 1. 墙面高空跳台 (WallPerch) - 猫咪最爱的高处领地！
   class WallPerch {
@@ -19,7 +20,16 @@
     }
 
     getPerchSurfaces() {
-      return [{ id: this, x: this.x, y: this.y, w: this.w, h: this.h, type: 'perch' }];
+      // 复用同一个落脚面对象：几何是静态的，只更新字段，避免每帧为每只猫分配新数组
+      if (!this._perchSurfaces) {
+        this._perchSurfaces = [{ id: this, x: 0, y: 0, w: 0, h: 0, type: 'perch' }];
+      }
+      const s = this._perchSurfaces[0];
+      s.x = this.x;
+      s.y = this.y;
+      s.w = this.w;
+      s.h = this.h;
+      return this._perchSurfaces;
     }
 
     update(width, height) {
@@ -214,10 +224,13 @@
       // 物理推力碰撞：撞击推开挡路的毛线球与纸箱！
       if (sceneContext && sceneContext.toys) {
         for (let t of sceneContext.toys) {
+          // 水洼等静态道具不参与物理推撞；过期对象直接跳过
+          if (!t || t.type === 'puddle' || (t.isExpired && t.isExpired())) continue;
           const dx = t.x - this.x;
           const dy = t.y - this.y;
           const dist = Math.hypot(dx, dy);
-          const minD = this.radius + (t.radius || t.w / 2 || 15);
+          const radius = Number.isFinite(t.radius) ? t.radius : (Number.isFinite(t.w) ? t.w / 2 : 15);
+          const minD = this.radius + radius;
           if (dist < minD && dist > 1) {
             // 将道具弹开推走！
             const pushForce = Math.sign(this.vx) * 3.5;
@@ -335,16 +348,21 @@
     }
 
     getPerchSurfaces() {
-      return this.tiers.map(t => ({
-        id: t,
-        x: this.x + t.xOffset,
-        y: this.y + t.yOffset,
-        w: t.w,
-        h: t.h,
-        type: 'cattree',
-        tier: t,
-        tree: this
-      }));
+      // 层级数量固定，对象只创建一次；猫数量增多时不再重复分配临时数组
+      if (!this._perchSurfaces) {
+        this._perchSurfaces = this.tiers.map(t => ({
+          id: t, x: 0, y: 0, w: 0, h: 0, type: 'cattree', tier: t, tree: this
+        }));
+      }
+      for (let i = 0; i < this.tiers.length; i++) {
+        const t = this.tiers[i];
+        const s = this._perchSurfaces[i];
+        s.x = this.x + t.xOffset;
+        s.y = this.y + t.yOffset;
+        s.w = t.w;
+        s.h = t.h;
+      }
+      return this._perchSurfaces;
     }
 
     update(width, height) {
@@ -486,32 +504,41 @@
     update(width, height) {
       this.pulse += 0.02;
       this.driftPhase += 0.003;
-      // 阳光随白昼慢速横向平移，吸引打盹猫咪追随暖光
+      // 阳光随白昼慢速横向平移，吸引打盹猫咪追随暖光；缓存 floorY 供 draw 使用
       this.x = this.baseX + Math.sin(this.driftPhase) * 75;
+      this.floorY = physicsWorld.getFloorY(height);
     }
 
-    draw(ctx, height) {
+    draw(ctx) {
       ctx.save();
-      const floorY = physicsWorld.getFloorY(height);
+      const floorY = Number.isFinite(this.floorY) ? this.floorY : physicsWorld.getFloorY(window.innerHeight);
       const glow = Math.sin(this.pulse) * 0.05 + 0.2;
 
-      const grad = ctx.createLinearGradient(this.x - 70, 0, this.x, floorY);
-      grad.addColorStop(0, 'rgba(255, 234, 167, 0.02)');
-      grad.addColorStop(0.7, `rgba(255, 234, 167, ${glow})`);
-      grad.addColorStop(1, `rgba(254, 202, 87, ${glow + 0.1})`);
+      // 渐变坐标相对阳光自身，按 floorY 缓存一次即可；呼吸亮度用 globalAlpha 表达
+      if (!this._gradient || this._gradientFloorY !== floorY) {
+        const grad = ctx.createLinearGradient(-70, 0, 0, floorY);
+        grad.addColorStop(0, 'rgba(255, 234, 167, 0.02)');
+        grad.addColorStop(0.7, 'rgba(255, 234, 167, 0.25)');
+        grad.addColorStop(1, 'rgba(254, 202, 87, 0.35)');
+        this._gradient = grad;
+        this._gradientFloorY = floorY;
+      }
 
-      ctx.fillStyle = grad;
+      ctx.translate(this.x, 0);
+      ctx.globalAlpha = glow / 0.25;
+      ctx.fillStyle = this._gradient;
       ctx.beginPath();
-      ctx.moveTo(this.x - 80, 0);
-      ctx.lineTo(this.x + 40, 0);
-      ctx.lineTo(this.x + this.width / 2 + 25, floorY);
-      ctx.lineTo(this.x - this.width / 2 - 25, floorY);
+      ctx.moveTo(-80, 0);
+      ctx.lineTo(40, 0);
+      ctx.lineTo(this.width / 2 + 25, floorY);
+      ctx.lineTo(-this.width / 2 - 25, floorY);
       ctx.closePath();
       ctx.fill();
 
       // 地面温暖光晕
+      ctx.globalAlpha = 1;
       ctx.beginPath();
-      ctx.ellipse(this.x, floorY, this.width * 0.55, 12, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, floorY, this.width * 0.55, 12, 0, 0, Math.PI * 2);
       ctx.fillStyle = `rgba(255, 204, 0, ${glow * 0.8})`;
       ctx.fill();
 
@@ -531,6 +558,7 @@
       this.dispenseAnim = 0;
       this.shakeTimer = 0;
       this.foodBowlLevel = 3;
+      this.foodDecayTimer = 0;
     }
 
     // 接收猫咪猫爪物理拍打 (Cat Paw Tap & Hacker Hack)
@@ -561,6 +589,8 @@
       }
       if (sceneContext && sceneContext.toys) {
         const FishTreatClass = window.CyberMeow.FishTreat;
+        // 模块加载顺序变化时 FishTreat 可能尚未就绪，避免 new undefined 中断主循环
+        if (typeof FishTreatClass !== 'function') return;
         const fish = new FishTreatClass(this.x + 16, this.y - 12);
         fish.vx = 2.2 + Math.random() * 1.5;
         fish.vy = -3.2;
@@ -574,6 +604,15 @@
     update(width, height, sceneContext) {
       if (this.dispenseAnim > 0) this.dispenseAnim--;
       if (this.shakeTimer > 0) this.shakeTimer--;
+
+      // 碗中猫粮随时间被吃掉/风干，避免 foodBowlLevel 只增不减、视觉永远满碗
+      if (this.foodBowlLevel > 0) {
+        this.foodDecayTimer++;
+        if (this.foodDecayTimer >= 150) {
+          this.foodDecayTimer = 0;
+          this.foodBowlLevel = Math.max(0, this.foodBowlLevel - 1);
+        }
+      }
 
       this.autoTimer--;
       // 自动投喂：每隔一段时间或有猫咪想吃点心
@@ -691,7 +730,15 @@
     }
 
     getPerchSurfaces() {
-      return [{ id: this, x: this.x, y: this.y + this.dynamicSag, w: this.w, h: this.h, type: 'bridge' }];
+      if (!this._perchSurfaces) {
+        this._perchSurfaces = [{ id: this, x: 0, y: 0, w: 0, h: 0, type: 'bridge' }];
+      }
+      const s = this._perchSurfaces[0];
+      s.x = this.x;
+      s.y = this.y + this.dynamicSag; // 桥面随猫咪行走动态下沉
+      s.w = this.w;
+      s.h = this.h;
+      return this._perchSurfaces;
     }
 
     update(width, height, sceneContext) {
@@ -818,7 +865,15 @@
     }
 
     getPerchSurfaces() {
-      return [{ id: this, x: this.x + Math.sin(this.swayAngle) * 15, y: this.y, w: this.w * 0.85, h: this.h, type: 'hammock' }];
+      if (!this._perchSurfaces) {
+        this._perchSurfaces = [{ id: this, x: 0, y: 0, w: 0, h: 0, type: 'hammock' }];
+      }
+      const s = this._perchSurfaces[0];
+      s.x = this.x + Math.sin(this.swayAngle) * 15;
+      s.y = this.y;
+      s.w = this.w * 0.85;
+      s.h = this.h;
+      return this._perchSurfaces;
     }
 
     nudge(impulse = 0.08) {
@@ -848,9 +903,12 @@
       this.swaySpeed *= 0.985;
       this.swayAngle += this.swaySpeed;
 
-      // 有猫在里面时轻微起伏呼吸感
+      // 有猫在里面时轻微起伏呼吸感：用帧相位缓慢逼近目标角度，
+      // 不直接赋值，避免与上面的弹簧积分相互打断造成视觉跳变
       if (this.occupant && Math.abs(this.swaySpeed) < 0.002) {
-        this.swayAngle = Math.sin(Date.now() * 0.0018) * 0.02;
+        this._breathPhase = (this._breathPhase || 0) + 0.02;
+        const target = Math.sin(this._breathPhase) * 0.02;
+        this.swayAngle += (target - this.swayAngle) * 0.05;
       }
     }
 
@@ -941,16 +999,20 @@
     }
 
     getPerchSurfaces() {
-      return this.steps.map(s => ({
-        id: s,
-        x: s.x,
-        y: s.y,
-        w: s.w,
-        h: s.h,
-        type: 'ladder',
-        step: s,
-        ladder: this
-      }));
+      if (!this._perchSurfaces) {
+        this._perchSurfaces = this.steps.map(s => ({
+          id: s, x: 0, y: 0, w: 0, h: 0, type: 'ladder', step: s, ladder: this
+        }));
+      }
+      for (let i = 0; i < this.steps.length; i++) {
+        const step = this.steps[i];
+        const surface = this._perchSurfaces[i];
+        surface.x = step.x;
+        surface.y = step.y;
+        surface.w = step.w;
+        surface.h = step.h;
+      }
+      return this._perchSurfaces;
     }
 
     update(width, height) {
@@ -1086,8 +1148,7 @@
       ctx.fill();
 
       // 飘逸羽毛束
-      const featherColors = ['#fd79a8', '#a29bfe', '#ffeaa7'];
-      featherColors.forEach((fc, idx) => {
+      FEATHER_COLORS.forEach((fc, idx) => {
         ctx.fillStyle = fc;
         ctx.beginPath();
         const angle = 0.5 + idx * 0.5 + flutter * 0.5;

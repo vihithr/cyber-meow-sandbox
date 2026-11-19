@@ -5,9 +5,58 @@
 (function(window) {
   'use strict';
 
+  // Web Audio 不可用时的空实现：保持完整 API 形状，让所有播放方法安全降级为静音，
+  // 避免 new undefined() 或后续链式调用抛错中断 UI 与主循环
+  const SILENT_SAMPLES = new Float32Array(0);
+  function createSilentContext() {
+    const noop = () => {};
+    const param = () => ({
+      value: 0,
+      setValueAtTime: noop,
+      linearRampToValueAtTime: noop,
+      exponentialRampToValueAtTime: noop,
+      cancelScheduledValues: noop
+    });
+    const node = () => ({ connect: noop, disconnect: noop, start: noop, stop: noop });
+    return {
+      state: 'running',
+      currentTime: 0,
+      sampleRate: 44100,
+      destination: node(),
+      resume: () => Promise.resolve(),
+      suspend: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+      createGain: () => Object.assign(node(), { gain: param() }),
+      createOscillator: () => Object.assign(node(), { frequency: param(), type: 'sine' }),
+      createBiquadFilter: () => Object.assign(node(), { frequency: param(), Q: param(), type: 'lowpass' }),
+      createBufferSource: () => Object.assign(node(), { buffer: null, loop: false }),
+      createBuffer: () => ({ getChannelData: () => SILENT_SAMPLES })
+    };
+  }
+
   class SoundEngine {
+    // 一次性音源结束后断开整条音频链，避免节点在 AudioContext 图中累积
+    _releaseOnEnded(source, ...nodes) {
+      source.onended = () => {
+        try {
+          source.disconnect();
+          for (const node of nodes) {
+            if (node) node.disconnect();
+          }
+        } catch (e) {}
+      };
+    }
+
+    // 停止并断开持续声源节点（供 dispose 使用；GainNode 无 stop，由 try 吞掉）
+    _stopAndRelease(node) {
+      if (!node) return;
+      try { node.stop(); } catch (e) {}
+      try { node.disconnect(); } catch (e) {}
+    }
+
     constructor() {
       this.ctx = null;
+      this.unavailable = false;
       this.masterGain = null;
       this.sfxGain = null;
       this.bgmGain = null;
@@ -17,21 +66,155 @@
       // 呼噜声节点
       this.purrSource = null;
       this.purrGain = null;
+      this.purrFilter = null;
+      this.purrLfo = null;
+      this.purrLfoGain = null;
       this.purrActiveCount = 0;
+      this.purrStopTimer = null;
 
       // 扫地机嗡嗡声节点
       this.roombaOsc = null;
       this.roombaGain = null;
+      this.roombaFilter = null;
+      this.roombaStopTimer = null;
 
       // Lofi 音乐定时器
       this.lofiTimer = null;
       this.lofiStep = 0;
+
+      // 页面可见性 / 生命周期状态
+      this._visibilityBound = false;
+      this._visibilityHandler = null;
+      this._pausedByVisibility = false;
+      this._purrActiveBeforeHide = false;
+      this._roombaActiveBeforeHide = false;
+      this._disposed = false;
+
+      this._bindVisibility();
+    }
+
+    // --- 页面可见性与资源生命周期 ---
+    // 监听注册带防御：无 document / 无 addEventListener 的测试环境直接跳过
+    _bindVisibility() {
+      if (this._visibilityBound) return;
+      if (typeof document === 'undefined' || !document.addEventListener) return;
+      try {
+        this._visibilityHandler = () => {
+          if (typeof document === 'undefined') return;
+          const hidden = document.hidden || document.visibilityState === 'hidden';
+          if (hidden) this._onHidden();
+          else this._onVisible();
+        };
+        document.addEventListener('visibilitychange', this._visibilityHandler);
+        this._visibilityBound = true;
+      } catch (e) {}
+    }
+
+    _onHidden() {
+      if (this._disposed || this._pausedByVisibility) return;
+      this._pausedByVisibility = true;
+      // 先记录持续声源是否活跃（stopPurr/stopRoomba 会清引用），回到页面时据此恢复
+      this._purrActiveBeforeHide = !!(this.purrSource && this.purrActiveCount > 0);
+      this._roombaActiveBeforeHide = !!this.roombaOsc;
+      // 挂起音频上下文
+      if (this.ctx && this.ctx.state === 'running') {
+        try {
+          const p = this.ctx.suspend();
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        } catch (e) {}
+      }
+      // 停掉 Lofi 定时器，避免 suspended 期间继续 schedule 节点；保留 bgmEnabled 用户意图
+      if (this.lofiTimer) {
+        clearInterval(this.lofiTimer);
+        this.lofiTimer = null;
+      }
+      // 停止持续声源
+      if (this.purrSource) this.stopPurr();
+      if (this.roombaOsc) this.stopRoomba();
+    }
+
+    _onVisible() {
+      if (this._disposed || !this._pausedByVisibility) return;
+      this._pausedByVisibility = false;
+      // 恢复音频上下文
+      if (this.ctx && this.ctx.state === 'suspended') {
+        try {
+          const p = this.ctx.resume();
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        } catch (e) {}
+      }
+      // 恢复用户此前开启的 Lofi
+      if (this.bgmEnabled && !this.lofiTimer) this.startLofiBGM();
+      // 恢复隐藏前活跃的持续声源
+      if (this._purrActiveBeforeHide) {
+        this._purrActiveBeforeHide = false;
+        this.startPurr();
+      }
+      if (this._roombaActiveBeforeHide) {
+        this._roombaActiveBeforeHide = false;
+        this.startRoomba();
+      }
+    }
+
+    // 释放全部资源：移除监听、清理定时器、停止并断开节点、关闭音频上下文
+    dispose() {
+      if (this._disposed) return;
+      this._disposed = true;
+
+      if (this._visibilityBound && typeof document !== 'undefined' && document.removeEventListener && this._visibilityHandler) {
+        try { document.removeEventListener('visibilitychange', this._visibilityHandler); } catch (e) {}
+      }
+      this._visibilityHandler = null;
+      this._visibilityBound = false;
+
+      if (this.lofiTimer) { clearInterval(this.lofiTimer); this.lofiTimer = null; }
+      if (this.purrStopTimer) { clearTimeout(this.purrStopTimer); this.purrStopTimer = null; }
+      if (this.roombaStopTimer) { clearTimeout(this.roombaStopTimer); this.roombaStopTimer = null; }
+
+      this._stopAndRelease(this.purrSource);
+      this._stopAndRelease(this.purrLfo);
+      this._stopAndRelease(this.purrLfoGain);
+      this._stopAndRelease(this.purrFilter);
+      this._stopAndRelease(this.purrGain);
+      this._stopAndRelease(this.roombaOsc);
+      this._stopAndRelease(this.roombaFilter);
+      this._stopAndRelease(this.roombaGain);
+      this.purrSource = null;
+      this.purrLfo = null;
+      this.purrLfoGain = null;
+      this.purrFilter = null;
+      this.purrGain = null;
+      this.roombaOsc = null;
+      this.roombaFilter = null;
+      this.roombaGain = null;
+      this.purrActiveCount = 0;
+      this.bgmEnabled = false;
+      this._pausedByVisibility = false;
+      this._purrActiveBeforeHide = false;
+      this._roombaActiveBeforeHide = false;
+
+      if (this.ctx && !this.unavailable) {
+        try {
+          const p = this.ctx.close();
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        } catch (e) {}
+      }
     }
 
     init() {
       if (!this.ctx) {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        this.ctx = new AudioCtx();
+        if (typeof AudioCtx === 'function') {
+          try {
+            this.ctx = new AudioCtx();
+          } catch (e) {
+            this.ctx = createSilentContext();
+            this.unavailable = true;
+          }
+        } else {
+          this.ctx = createSilentContext();
+          this.unavailable = true;
+        }
 
         this.masterGain = this.ctx.createGain();
         this.masterGain.gain.value = 0.8;
@@ -46,7 +229,10 @@
         this.bgmGain.connect(this.masterGain);
       }
       if (this.ctx.state === 'suspended') {
-        this.ctx.resume();
+        try {
+          const resumePromise = this.ctx.resume();
+          if (resumePromise && typeof resumePromise.catch === 'function') resumePromise.catch(() => {});
+        } catch (e) {}
       }
     }
 
@@ -59,7 +245,7 @@
 
     // --- 猫咪叫声合成器 (多种情绪模式) ---
     playMeow(pitchMod = 1.0, mood = 'regular') {
-      if (this.isMuted) return;
+      if (this.isMuted || this._disposed) return;
       this.init();
       const now = this.ctx.currentTime;
 
@@ -78,6 +264,7 @@
           g.connect(this.sfxGain);
           osc.start(t);
           osc.stop(t + 0.05);
+          this._releaseOnEnded(osc, g);
         }
         return;
       }
@@ -134,14 +321,25 @@
 
       osc.start(now);
       osc.stop(now + duration + 0.02);
+      this._releaseOnEnded(osc, filter, gain);
     }
 
     // --- 真实呼噜声引擎 (25Hz 低频震颤 + 粉红噪声) ---
     startPurr() {
-      if (this.isMuted) return;
+      if (this.isMuted || this._disposed) return;
       this.init();
-      this.purrActiveCount++;
-      if (this.purrSource) return;
+      if (this.purrSource) {
+        // 梳毛/挠下巴会高频调用：声源已存在时只取消待执行的停止并恢复音量
+        clearTimeout(this.purrStopTimer);
+        if (this.purrGain && this.ctx) {
+          const gain = this.purrGain.gain;
+          gain.cancelScheduledValues(this.ctx.currentTime);
+          gain.setValueAtTime(Math.max(0.01, gain.value), this.ctx.currentTime);
+          gain.linearRampToValueAtTime(0.28, this.ctx.currentTime + 0.2);
+        }
+        return;
+      }
+      this.purrActiveCount = 1;
 
       const bufferSize = this.ctx.sampleRate * 2;
       const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
@@ -174,6 +372,7 @@
       lfo.frequency.value = 24; // 经典猫呼噜频率 20-30Hz
       const lfoGain = this.ctx.createGain();
       lfoGain.gain.value = 0.8;
+      this.purrLfoGain = lfoGain;
 
       this.purrGain = this.ctx.createGain();
       this.purrGain.gain.setValueAtTime(0.01, this.ctx.currentTime);
@@ -182,6 +381,7 @@
       lfo.connect(lfoGain);
       lfoGain.connect(this.purrGain.gain);
 
+      this.purrFilter = filter;
       this.purrSource.connect(filter);
       filter.connect(this.purrGain);
       this.purrGain.connect(this.sfxGain);
@@ -192,25 +392,43 @@
     }
 
     stopPurr() {
-      this.purrActiveCount = Math.max(0, this.purrActiveCount - 1);
-      if (this.purrActiveCount === 0 && this.purrGain && this.ctx) {
-        this.purrGain.gain.linearRampToValueAtTime(0.001, this.ctx.currentTime + 0.3);
-        setTimeout(() => {
-          if (this.purrActiveCount === 0 && this.purrSource) {
-            try {
-              this.purrSource.stop();
-              this.purrLfo.stop();
-            } catch (e) {}
-            this.purrSource = null;
-            this.purrLfo = null;
-          }
-        }, 320);
-      }
+      this.purrActiveCount = 0;
+      if (!this.purrSource || !this.purrGain || !this.ctx) return;
+      clearTimeout(this.purrStopTimer);
+      const gain = this.purrGain.gain;
+      gain.cancelScheduledValues(this.ctx.currentTime);
+      gain.setValueAtTime(Math.max(0.001, gain.value), this.ctx.currentTime);
+      gain.linearRampToValueAtTime(0.001, this.ctx.currentTime + 0.3);
+
+      // 捕获本次声源引用：延迟回调只处理它，避免与 320ms 内重启的新声源竞态
+      const source = this.purrSource;
+      const lfo = this.purrLfo;
+      const lfoGain = this.purrLfoGain;
+      const filter = this.purrFilter;
+      const purrGain = this.purrGain;
+      this.purrStopTimer = setTimeout(() => {
+        try {
+          source.stop();
+          if (lfo) lfo.stop();
+          source.disconnect();
+          if (lfo) lfo.disconnect();
+          if (lfoGain) lfoGain.disconnect();
+          if (filter) filter.disconnect();
+          purrGain.disconnect();
+        } catch (e) {}
+        if (this.purrSource === source) {
+          this.purrSource = null;
+          this.purrLfo = null;
+          this.purrLfoGain = null;
+          this.purrFilter = null;
+          this.purrGain = null;
+        }
+      }, 320);
     }
 
     // --- 吃鱼干咀嚼声 ---
     playCrunch() {
-      if (this.isMuted) return;
+      if (this.isMuted || this._disposed) return;
       this.init();
       const now = this.ctx.currentTime;
       for (let i = 0; i < 3; i++) {
@@ -226,12 +444,13 @@
         gain.connect(this.sfxGain);
         osc.start(t);
         osc.stop(t + 0.045);
+        this._releaseOnEnded(osc, gain);
       }
     }
 
     // --- 抓板磨爪声 ---
     playScratch() {
-      if (this.isMuted) return;
+      if (this.isMuted || this._disposed) return;
       this.init();
       const now = this.ctx.currentTime;
       const buffer = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * 0.08), this.ctx.sampleRate);
@@ -256,11 +475,12 @@
       gain.connect(this.sfxGain);
 
       noise.start(now);
+      this._releaseOnEnded(noise, filter, gain);
     }
 
     // --- 猫咪哈气警告 (Hissing) ---
     playHiss() {
-      if (this.isMuted) return;
+      if (this.isMuted || this._disposed) return;
       this.init();
       const now = this.ctx.currentTime;
       const dur = 0.35;
@@ -286,11 +506,12 @@
       filter.connect(gain);
       gain.connect(this.sfxGain);
       noise.start(now);
+      this._releaseOnEnded(noise, filter, gain);
     }
 
     // --- 喵喵拳互拍 (Cat Slap) ---
     playSlap() {
-      if (this.isMuted) return;
+      if (this.isMuted || this._disposed) return;
       this.init();
       const now = this.ctx.currentTime;
       const osc = this.ctx.createOscillator();
@@ -306,11 +527,12 @@
       gain.connect(this.sfxGain);
       osc.start(now);
       osc.stop(now + 0.1);
+      this._releaseOnEnded(osc, gain);
     }
 
     // --- 观鸟捕食快速齿颤声 (Chattering) ---
     playChatter(pitchMod = 1.0) {
-      if (this.isMuted) return;
+      if (this.isMuted || this._disposed) return;
       this.init();
       const now = this.ctx.currentTime;
       const clicks = 5 + Math.floor(Math.random() * 4);
@@ -328,12 +550,13 @@
         g.connect(this.sfxGain);
         osc.start(t);
         osc.stop(t + 0.04);
+        this._releaseOnEnded(osc, g);
       }
     }
 
     // --- 窗外小鸟啁啾声 (Bird Tweet) ---
     playBirdTweet() {
-      if (this.isMuted) return;
+      if (this.isMuted || this._disposed) return;
       this.init();
       const now = this.ctx.currentTime;
       const osc = this.ctx.createOscillator();
@@ -351,11 +574,12 @@
       gain.connect(this.sfxGain);
       osc.start(now);
       osc.stop(now + 0.2);
+      this._releaseOnEnded(osc, gain);
     }
 
     // --- 猫咪领地争夺低吼 (Low Territorial Growl) ---
     playLowGrowl(pitchMod = 1.0) {
-      if (this.isMuted) return;
+      if (this.isMuted || this._disposed) return;
       this.init();
       const now = this.ctx.currentTime;
       const osc = this.ctx.createOscillator();
@@ -380,11 +604,12 @@
       gain.connect(this.sfxGain);
       osc.start(now);
       osc.stop(now + 0.9);
+      this._releaseOnEnded(osc, filter, gain);
     }
 
     // --- 水花飞溅 / 湿爪甩动 (Water Splash) ---
     playWaterSplash() {
-      if (this.isMuted) return;
+      if (this.isMuted || this._disposed) return;
       this.init();
       const now = this.ctx.currentTime;
       const buffer = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * 0.12), this.ctx.sampleRate);
@@ -408,12 +633,15 @@
       filter.connect(gain);
       gain.connect(this.sfxGain);
       noise.start(now);
+      this._releaseOnEnded(noise, filter, gain);
     }
 
     // --- 扫地机器人马达嗡嗡声 ---
     startRoomba() {
-      if (this.isMuted || this.roombaOsc) return;
+      if (this.isMuted || this._disposed || this.roombaOsc) return;
       this.init();
+      // 若上一次停止的淡出尚未结束，取消其清理定时器，让新声源正常起振
+      clearTimeout(this.roombaStopTimer);
       const now = this.ctx.currentTime;
       this.roombaOsc = this.ctx.createOscillator();
       this.roombaGain = this.ctx.createGain();
@@ -422,6 +650,7 @@
       this.roombaOsc.frequency.setValueAtTime(85, now);
 
       const filter = this.ctx.createBiquadFilter();
+      this.roombaFilter = filter;
       filter.type = 'lowpass';
       filter.frequency.setValueAtTime(220, now);
 
@@ -436,21 +665,31 @@
     }
 
     stopRoomba() {
-      if (this.roombaOsc && this.roombaGain) {
-        this.roombaGain.gain.linearRampToValueAtTime(0.0001, this.ctx.currentTime + 0.3);
-        setTimeout(() => {
-          if (this.roombaOsc) {
-            try { this.roombaOsc.stop(); } catch(e) {}
-            this.roombaOsc = null;
-            this.roombaGain = null;
-          }
-        }, 320);
-      }
+      if (!this.roombaOsc || !this.roombaGain || !this.ctx) return;
+      clearTimeout(this.roombaStopTimer);
+      const osc = this.roombaOsc;
+      const gain = this.roombaGain;
+      const filter = this.roombaFilter;
+      gain.gain.cancelScheduledValues(this.ctx.currentTime);
+      gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), this.ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.0001, this.ctx.currentTime + 0.3);
+      // 立即释放引用，使 320ms 淡出期间再次 startRoomba 不会被早退忽略
+      this.roombaOsc = null;
+      this.roombaGain = null;
+      this.roombaFilter = null;
+      this.roombaStopTimer = setTimeout(() => {
+        try {
+          osc.stop();
+          osc.disconnect();
+          if (filter) filter.disconnect();
+          gain.disconnect();
+        } catch (e) {}
+      }, 320);
     }
 
     // --- 相机快门拍照声 ---
     playShutter() {
-      if (this.isMuted) return;
+      if (this.isMuted || this._disposed) return;
       this.init();
       const now = this.ctx.currentTime;
       // 机械咔哒
@@ -465,10 +704,11 @@
       g.connect(this.sfxGain);
       osc.start(now);
       osc.stop(now + 0.04);
+      this._releaseOnEnded(osc, g);
 
       // 快门收起
       setTimeout(() => {
-        if (!this.ctx) return;
+        if (!this.ctx || this._disposed) return;
         const t2 = this.ctx.currentTime;
         const o2 = this.ctx.createOscillator();
         const g2 = this.ctx.createGain();
@@ -480,12 +720,13 @@
         g2.connect(this.sfxGain);
         o2.start(t2);
         o2.stop(t2 + 0.06);
+        this._releaseOnEnded(o2, g2);
       }, 70);
     }
 
     // --- 弹性物体反弹声 ---
     playBounce() {
-      if (this.isMuted) return;
+      if (this.isMuted || this._disposed) return;
       this.init();
       const now = this.ctx.currentTime;
       const osc = this.ctx.createOscillator();
@@ -499,11 +740,12 @@
       gain.connect(this.sfxGain);
       osc.start(now);
       osc.stop(now + 0.1);
+      this._releaseOnEnded(osc, gain);
     }
 
     // --- 泡泡 / 放置物品声 ---
     playPop() {
-      if (this.isMuted) return;
+      if (this.isMuted || this._disposed) return;
       this.init();
       const now = this.ctx.currentTime;
       const osc = this.ctx.createOscillator();
@@ -517,11 +759,12 @@
       gain.connect(this.sfxGain);
       osc.start(now);
       osc.stop(now + 0.08);
+      this._releaseOnEnded(osc, gain);
     }
 
     // --- 清脆铜铃铛 / 风铃羽毛玩具声 ---
     playBell() {
-      if (this.isMuted) return;
+      if (this.isMuted || this._disposed) return;
       this.init();
       const now = this.ctx.currentTime;
       // 双谐波闪烁金属音 (High sine chime pair)
@@ -536,12 +779,13 @@
         gain.connect(this.sfxGain);
         osc.start(now);
         osc.stop(now + 0.48);
+        this._releaseOnEnded(osc, gain);
       });
     }
 
     // --- 实木跳台踏板 / 悬索桥木板轻踏声 ---
     playWoodThud() {
-      if (this.isMuted) return;
+      if (this.isMuted || this._disposed) return;
       this.init();
       const now = this.ctx.currentTime;
       const osc = this.ctx.createOscillator();
@@ -555,10 +799,115 @@
       gain.connect(this.sfxGain);
       osc.start(now);
       osc.stop(now + 0.09);
+      this._releaseOnEnded(osc, gain);
+    }
+
+    // --- 陶瓷 / 玻璃高空推落碎裂声 (高频脆响 + 碎片崩裂) ---
+    playGlassShatter() {
+      if (this.isMuted || this._disposed) return;
+      this.init();
+      const now = this.ctx.currentTime;
+      // 1. 高频金属/陶瓷撞击噪波
+      const bufferSize = Math.floor(this.ctx.sampleRate * 0.12);
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.2));
+      }
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+      const noiseFilter = this.ctx.createBiquadFilter();
+      noiseFilter.type = 'highpass';
+      noiseFilter.frequency.setValueAtTime(3200, now);
+      const noiseGain = this.ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.24, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+      noise.connect(noiseFilter);
+      noiseFilter.connect(noiseGain);
+      noiseGain.connect(this.sfxGain);
+      noise.start(now);
+      noise.stop(now + 0.13);
+      this._releaseOnEnded(noise, noiseFilter, noiseGain);
+
+      // 2. 陶瓷碎片微鸣叮当 (Dual ringing harmonics)
+      [2400, 3950].forEach((freq, idx) => {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq + (Math.random() - 0.5) * 60, now + idx * 0.02);
+        gain.gain.setValueAtTime(0.14 / (idx + 1), now + idx * 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35 + idx * 0.05);
+        osc.connect(gain);
+        gain.connect(this.sfxGain);
+        osc.start(now + idx * 0.02);
+        osc.stop(now + 0.42);
+        this._releaseOnEnded(osc, gain);
+      });
+    }
+
+    // --- 观鸟捕猎齿颤 Ek-ek-ek 声 (高频短促多脉冲咔咔声) ---
+    playChatter() {
+      if (this.isMuted || this._disposed) return;
+      this.init();
+      const now = this.ctx.currentTime;
+      for (let i = 0; i < 4; i++) {
+        const t = now + i * 0.055;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1750 + Math.random() * 250, t);
+        osc.frequency.exponentialRampToValueAtTime(1100, t + 0.035);
+        gain.gain.setValueAtTime(0.12, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
+        osc.connect(gain);
+        gain.connect(this.sfxGain);
+        osc.start(t);
+        osc.stop(t + 0.04);
+        this._releaseOnEnded(osc, gain);
+      }
+    }
+
+    // --- 猫猫拳肉垫互扇声 (脆响轻拍) ---
+    playSlap() {
+      if (this.isMuted || this._disposed) return;
+      this.init();
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(450 + Math.random() * 100, now);
+      osc.frequency.exponentialRampToValueAtTime(120, now + 0.045);
+      gain.gain.setValueAtTime(0.22, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now);
+      osc.stop(now + 0.055);
+      this._releaseOnEnded(osc, gain);
+    }
+
+    // --- 极速狂飙暴走音效 (低音马达加速 + 破空风声) ---
+    playZoomies() {
+      if (this.isMuted || this._disposed) return;
+      this.init();
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(110, now);
+      osc.frequency.exponentialRampToValueAtTime(680, now + 0.35);
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now);
+      osc.stop(now + 0.42);
+      this._releaseOnEnded(osc, gain);
     }
 
     // --- 程序化极简 Lofi 氛围生成乐 (温和五声音阶循环) ---
     toggleBGM() {
+      if (this._disposed) return this.bgmEnabled;
       this.bgmEnabled = !this.bgmEnabled;
       if (this.bgmEnabled) {
         this.init();
@@ -580,7 +929,7 @@
       ];
 
       const playChord = () => {
-        if (!this.bgmEnabled || this.isMuted) return;
+        if (this._disposed || !this.bgmEnabled || this.isMuted) return;
         this.init();
         const chord = chords[this.lofiStep % chords.length];
         this.lofiStep++;
@@ -610,6 +959,7 @@
 
           osc.start(noteStart);
           osc.stop(noteStart + 3.3);
+          this._releaseOnEnded(osc, filter, gain);
         });
       };
 

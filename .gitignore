@@ -6,6 +6,11 @@ desktop.ini
 # Node.js
 node_modules/
 npm-debug.log*
+*.log
+
+# 本地环境配置（避免误提交密钥/端口等敏感信息）
+.env
+.env.*
 
 # Python
 __pycache__/

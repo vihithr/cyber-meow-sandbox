@@ -1,0 +1,308 @@
+{
+  "env": {
+    "node": "v24.15.0",
+    "platform": "win32",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 7 7840HS w/ Radeon 780M Graphics     ",
+    "gcEnabled": true,
+    "params": {
+      "REPEATS": 7,
+      "WARMUP": 2,
+      "R": 40,
+      "W": 1280,
+      "H": 720,
+      "FRAMES": {
+        "40": 2000,
+        "80": 2000,
+        "200": 1000,
+        "240": 1000,
+        "360": 1000,
+        "500": 300,
+        "1000": 120,
+        "2000": 30
+      }
+    }
+  },
+  "rows": [
+    {
+      "n": 40,
+      "frames": 2000,
+      "oop": {
+        "key": "oop",
+        "checksum": 88000,
+        "totalMs": 8.5422,
+        "minTotalMs": 7.6643,
+        "maxTotalMs": 13.4803,
+        "integrateMs": 1.641,
+        "queryMs": 6.7658
+      },
+      "soa64": {
+        "key": "soa64",
+        "checksum": 88000,
+        "totalMs": 6.4433,
+        "minTotalMs": 4.0524,
+        "maxTotalMs": 18.2025,
+        "integrateMs": 0.6023,
+        "queryMs": 6.1107
+      },
+      "soa32": {
+        "key": "soa32",
+        "checksum": 88000,
+        "totalMs": 7.5185,
+        "minTotalMs": 4.346,
+        "maxTotalMs": 19.3097,
+        "integrateMs": 1.0027,
+        "queryMs": 6.5158
+      },
+      "spd64": 1.3257492278801235,
+      "spd32": 1.1361574782203896,
+      "oopUs": 4.2711,
+      "s32Us": 3.75925
+    },
+    {
+      "n": 80,
+      "frames": 2000,
+      "oop": {
+        "key": "oop",
+        "checksum": 252000,
+        "totalMs": 24.5392,
+        "minTotalMs": 21.1548,
+        "maxTotalMs": 31.3127,
+        "integrateMs": 2.2752,
+        "queryMs": 22.4899
+      },
+      "soa64": {
+        "key": "soa64",
+        "checksum": 252000,
+        "totalMs": 16.4215,
+        "minTotalMs": 15.4552,
+        "maxTotalMs": 19.1695,
+        "integrateMs": 0.7966,
+        "queryMs": 15.6699
+      },
+      "soa32": {
+        "key": "soa32",
+        "checksum": 252000,
+        "totalMs": 18.6614,
+        "minTotalMs": 16.0844,
+        "maxTotalMs": 22.6719,
+        "integrateMs": 1.0574,
+        "queryMs": 17.5426
+      },
+      "spd64": 1.4943336479615137,
+      "spd32": 1.3149710096777305,
+      "oopUs": 12.2696,
+      "s32Us": 9.3307
+    },
+    {
+      "n": 200,
+      "frames": 1000,
+      "oop": {
+        "key": "oop",
+        "checksum": 390000,
+        "totalMs": 79.6114,
+        "minTotalMs": 72.1475,
+        "maxTotalMs": 98.5465,
+        "integrateMs": 2.2867,
+        "queryMs": 77.4081
+      },
+      "soa64": {
+        "key": "soa64",
+        "checksum": 390000,
+        "totalMs": 74.6263,
+        "minTotalMs": 64.4892,
+        "maxTotalMs": 90.4636,
+        "integrateMs": 1.0694,
+        "queryMs": 73.4761
+      },
+      "soa32": {
+        "key": "soa32",
+        "checksum": 390000,
+        "totalMs": 61.9193,
+        "minTotalMs": 55.0422,
+        "maxTotalMs": 75.6091,
+        "integrateMs": 1.3516,
+        "queryMs": 60.3341
+      },
+      "spd64": 1.0668008463504153,
+      "spd32": 1.2857283593322277,
+      "oopUs": 79.6114,
+      "s32Us": 61.9193
+    },
+    {
+      "n": 240,
+      "frames": 1000,
+      "oop": {
+        "key": "oop",
+        "checksum": 522000,
+        "totalMs": 109.2662,
+        "minTotalMs": 105.151,
+        "maxTotalMs": 121.8427,
+        "integrateMs": 2.4389,
+        "queryMs": 106.6974
+      },
+      "soa64": {
+        "key": "soa64",
+        "checksum": 522000,
+        "totalMs": 102.2125,
+        "minTotalMs": 98.6071,
+        "maxTotalMs": 111.4463,
+        "integrateMs": 1.0878,
+        "queryMs": 101.0329
+      },
+      "soa32": {
+        "key": "soa32",
+        "checksum": 522000,
+        "totalMs": 86.3005,
+        "minTotalMs": 84.9755,
+        "maxTotalMs": 111.5625,
+        "integrateMs": 1.3545,
+        "queryMs": 84.7186
+      },
+      "spd64": 1.069010150421915,
+      "spd32": 1.2661131743153284,
+      "oopUs": 109.2662,
+      "s32Us": 86.3005
+    },
+    {
+      "n": 360,
+      "frames": 1000,
+      "oop": {
+        "key": "oop",
+        "checksum": 998000,
+        "totalMs": 289.4165,
+        "minTotalMs": 281.976,
+        "maxTotalMs": 400.7295,
+        "integrateMs": 3.3187,
+        "queryMs": 286.2621
+      },
+      "soa64": {
+        "key": "soa64",
+        "checksum": 998000,
+        "totalMs": 241.9816,
+        "minTotalMs": 234.7972,
+        "maxTotalMs": 349.1143,
+        "integrateMs": 1.8352,
+        "queryMs": 239.7557
+      },
+      "soa32": {
+        "key": "soa32",
+        "checksum": 998000,
+        "totalMs": 216.8593,
+        "minTotalMs": 212.3776,
+        "maxTotalMs": 314.9892,
+        "integrateMs": 1.9936,
+        "queryMs": 214.8355
+      },
+      "spd64": 1.1960268879947897,
+      "spd32": 1.3345819155553855,
+      "oopUs": 289.4165,
+      "s32Us": 216.8593
+    },
+    {
+      "n": 500,
+      "frames": 300,
+      "oop": {
+        "key": "oop",
+        "checksum": 538200,
+        "totalMs": 263.5591,
+        "minTotalMs": 241.4484,
+        "maxTotalMs": 317.753,
+        "integrateMs": 2.9952,
+        "queryMs": 260.493
+      },
+      "soa64": {
+        "key": "soa64",
+        "checksum": 538200,
+        "totalMs": 246.0631,
+        "minTotalMs": 198.1157,
+        "maxTotalMs": 259.2011,
+        "integrateMs": 1.0283,
+        "queryMs": 245.2193
+      },
+      "soa32": {
+        "key": "soa32",
+        "checksum": 538200,
+        "totalMs": 243.2995,
+        "minTotalMs": 218.7875,
+        "maxTotalMs": 255.1422,
+        "integrateMs": 1.8732,
+        "queryMs": 241.2933
+      },
+      "spd64": 1.0711037128281324,
+      "spd32": 1.0832702081179781,
+      "oopUs": 878.5303333333333,
+      "s32Us": 810.9983333333333
+    },
+    {
+      "n": 1000,
+      "frames": 120,
+      "oop": {
+        "key": "oop",
+        "checksum": 755520,
+        "totalMs": 483.7236,
+        "minTotalMs": 359.9795,
+        "maxTotalMs": 653.9641,
+        "integrateMs": 2.4076,
+        "queryMs": 481.316
+      },
+      "soa64": {
+        "key": "soa64",
+        "checksum": 755520,
+        "totalMs": 482.0695,
+        "minTotalMs": 323.6493,
+        "maxTotalMs": 546.154,
+        "integrateMs": 0.7532,
+        "queryMs": 481.4996
+      },
+      "soa32": {
+        "key": "soa32",
+        "checksum": 755520,
+        "totalMs": 450.2868,
+        "minTotalMs": 304.9728,
+        "maxTotalMs": 571.0065,
+        "integrateMs": 1.2346,
+        "queryMs": 449.0522
+      },
+      "spd64": 1.0034312479839524,
+      "spd32": 1.0742566737465986,
+      "oopUs": 4031.0299999999997,
+      "s32Us": 3752.3900000000003
+    },
+    {
+      "n": 2000,
+      "frames": 30,
+      "oop": {
+        "key": "oop",
+        "checksum": 692640,
+        "totalMs": 554.4033,
+        "minTotalMs": 471.4871,
+        "maxTotalMs": 772.9421,
+        "integrateMs": 1.8994,
+        "queryMs": 552.1567
+      },
+      "soa64": {
+        "key": "soa64",
+        "checksum": 692640,
+        "totalMs": 462.5748,
+        "minTotalMs": 427.1381,
+        "maxTotalMs": 519.4052,
+        "integrateMs": 0.5102,
+        "queryMs": 462.2503
+      },
+      "soa32": {
+        "key": "soa32",
+        "checksum": 692640,
+        "totalMs": 544.8477,
+        "minTotalMs": 414.2649,
+        "maxTotalMs": 585.7175,
+        "integrateMs": 0.4746,
+        "queryMs": 544.427
+      },
+      "spd64": 1.1985160021687302,
+      "spd32": 1.017538112026535,
+      "oopUs": 18480.109999999997,
+      "s32Us": 18161.590000000004
+    }
+  ]
+}

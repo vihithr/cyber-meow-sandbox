@@ -33,6 +33,16 @@
     PERSONALITIES
   } = window.CyberMeow;
 
+  // 实体数量上限：防止长时间游玩后玩具/家具无限累积拖慢主循环
+  const MAX_TOYS = 80;
+  const MAX_FURNITURE = 60;
+  const MAX_CATS = 40;
+  const MAX_PARTICLES = 240;
+
+  // 视口裁剪安全余量（世界像素）：覆盖最大道具半宽、悬吊摆动、拖拽与拖尾动画，
+  // 宁可多画一点也不误裁边缘对象；缩小视口范围才省填充率。
+  const CULL_MARGIN = 180;
+
   class CyberMeowApp {
     constructor() {
       this.canvas = document.getElementById('playground');
@@ -51,6 +61,8 @@
       this.isPanningCamera = false;
       this.panStartX = 0;
       this.panStartCamX = 0;
+      // 喵视角：非 null 时镜头持续跟随该猫（按 C 切换）
+      this.catCam = null;
 
       // 场景对象
       this.cats = [];
@@ -58,6 +70,13 @@
       this.furniture = [];
       this.particles = [];
       this.sunbeam = null;
+
+      // 离屏缓存层：按世界坐标烘焙（后备按 dpr 放大），相机平移/缩放时无需重建。
+      this._bgLayer = null;
+      this._bgLayerKey = '';
+      this._staticFurnitureLayer = null;
+      this._staticFurnitureLayerKey = '';
+      this._visibleRange = { left: -CULL_MARGIN, right: 0 };
 
       // 控制状态
       this.currentTool = 'pet';
@@ -93,12 +112,19 @@
       this.loop = this.loop.bind(this);
       requestAnimationFrame(this.loop);
 
-      uiManager.showToast('🏰 欢迎来到 3000px 超宽猫猫豪宅！按住鼠标右键可拖动平移全景~');
+      uiManager.showToast('🏰 欢迎来到 3000px 超宽猫猫豪宅！右键拖动平移全景，按 C 开启喵视角~');
     }
 
     resize() {
-      this.viewportWidth = this.canvas.width = window.innerWidth;
-      this.viewportHeight = this.canvas.height = window.innerHeight;
+      // 按设备像素比设置画布后备缓冲，避免高 DPI 屏幕上画面模糊；上限 2 以控制显存与填充率
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      this.dpr = dpr;
+      this.viewportWidth = window.innerWidth;
+      this.viewportHeight = window.innerHeight;
+      this.canvas.width = Math.round(this.viewportWidth * dpr);
+      this.canvas.height = Math.round(this.viewportHeight * dpr);
+      this.canvas.style.width = this.viewportWidth + 'px';
+      this.canvas.style.height = this.viewportHeight + 'px';
       this.worldWidth = Math.max(3000, window.innerWidth * 1.8);
       this.width = this.worldWidth;
       this.height = this.viewportHeight;
@@ -151,6 +177,7 @@
     }
 
     spawnParticle(x, y, text) {
+      if (this.particles.length >= MAX_PARTICLES) this.particles.shift();
       this.particles.push({
         x, y, text,
         vx: (Math.random() - 0.5) * 1.6,
@@ -209,6 +236,8 @@
 
         // 1. 右键或中键：进入视口相机拖拽平移
         if (e.button === 2 || e.button === 1) {
+          // 手动接管镜头时自动退出喵视角
+          this.catCam = null;
           this.isPanningCamera = true;
           this.panStartX = e.clientX;
           this.panStartCamX = this.targetCameraX;
@@ -327,6 +356,10 @@
 
         // 4. 工具使用逻辑 (在空白处点击)
         if (this.currentTool === 'cat') {
+          if (this.cats.length >= MAX_CATS) {
+            uiManager.showToast(`🐾 猫咪已达上限 ${MAX_CATS} 只，先撸撸现有的小可爱吧！`);
+            return;
+          }
           const newCat = new Cat(pos.x, pos.y);
           this.cats.push(newCat);
           soundEngine.playMeow(newCat.pitchMod, 'chirp');
@@ -495,8 +528,32 @@
           uiManager.showToast('🐱 触发全体猫咪大合唱！');
         } else if (key === 'p') {
           uiManager.takeSnapshot(this.canvas);
+        } else if (key === 'c') {
+          this.toggleCatCam();
         }
       });
+    }
+
+    // 喵视角：镜头跟随一只猫，假装自己就是它
+    toggleCatCam() {
+      if (this.catCam) {
+        this.catCam = null;
+        uiManager.showToast('🐾 已退出喵视角，恢复自由镜头~');
+        return;
+      }
+      if (!this.cats.length) {
+        uiManager.showToast('🐾 还没有猫咪可以跟随呢！');
+        return;
+      }
+      // 优先跟随离鼠标最近的猫；没有鼠标信息时取第一只
+      let cat = this.cats[0];
+      let best = Infinity;
+      for (const c of this.cats) {
+        const d = Math.hypot(c.x - this.mouse.x, c.y - this.mouse.y);
+        if (d < best) { best = d; cat = c; }
+      }
+      this.catCam = cat;
+      uiManager.showToast(`🐱 喵视角启动：镜头正在跟随「${cat.name}」！按 C 退出~`);
     }
 
     // 绑定豪宅三区分区导航与全景缩放切换
@@ -506,6 +563,8 @@
         btn.onclick = () => {
           zoneBtns.forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
+          // 分区导航是明确的手动镜头控制，退出喵视角
+          this.catCam = null;
 
           const zone = btn.dataset.zone;
           const maxCamX = Math.max(0, this.worldWidth - this.viewportWidth / this.zoom);
@@ -711,8 +770,9 @@
             personality,
             hat: item.hat
           });
-          if (item.hunger) cat.hunger = item.hunger;
-          if (item.affection) cat.affection = item.affection;
+          // 0 是合法的存档值（饥饿度/亲密度可能降到 0），不能用真值判断
+          if (Number.isFinite(item.hunger)) cat.hunger = MathUtils.clamp(item.hunger, 0, 100);
+          if (Number.isFinite(item.affection)) cat.affection = MathUtils.clamp(item.affection, 0, 100);
           return cat;
         });
 
@@ -747,15 +807,136 @@
       }
     }
 
+    // --- 渲染性能优化：视口裁剪与离屏缓存 ---
+    // 可见世界 x 范围 = [cameraX, cameraX + viewportWidth/zoom]，两侧再加安全余量。
+    _refreshVisibleRange() {
+      const viewW = this.viewportWidth / this.zoom;
+      this._visibleRange.left = this.cameraX - CULL_MARGIN;
+      this._visibleRange.right = this.cameraX + viewW + CULL_MARGIN;
+    }
+
+    // 对象中心 x 加减自身半宽是否落入可见范围。
+    _isVisibleX(x, halfWidth = 0) {
+      const r = this._visibleRange;
+      return x + halfWidth >= r.left && x - halfWidth <= r.right;
+    }
+
+    // 不同对象用 w / width / radius 表示尺寸，统一换算为世界半宽；缺省 24 足够保守。
+    _halfWidth(o) {
+      if (Number.isFinite(o.w)) return o.w / 2;
+      if (Number.isFinite(o.width)) return o.width / 2;
+      if (Number.isFinite(o.radius)) return o.radius;
+      return 24;
+    }
+
+    // 仅无动画视觉的家具可烘焙：跳台/爬梯/抓板的 update 只同步 y 或清理失效 occupant。
+    // Roomba、投喂机、猫爬架吊球、悬索桥、吊床、风铃、窗台小鸟都在 update 中改变画面，
+    // 烘焙会冻结动画，因此它们始终走动态绘制。
+    _isBakedFurniture(f) {
+      return !!f && (f.type === 'perch' || f.type === 'ladder' || f.type === 'scratcher');
+    }
+
+    _ensureLayerSlot(field) {
+      // 世界级离屏层固定按 1x 渲染：DPR=2 时两层约占 100MB 显存，1x 后约 26MB。
+      // 背景是渐变/木纹，家具是简单图形，放大后视觉损失很小；猫咪等动态主体仍在主画布按完整 DPR 绘制。
+      const layerDpr = 1;
+      const pw = Math.max(1, Math.round(this.worldWidth * layerDpr));
+      const ph = Math.max(1, Math.round(this.height * layerDpr));
+      let layer = this[field];
+      if (!layer || layer.width !== pw || layer.height !== ph) {
+        layer = document.createElement('canvas');
+        layer.width = pw;
+        layer.height = ph;
+        this[field] = layer;
+      }
+      layer._cacheDpr = layerDpr;
+      const lctx = layer.getContext('2d');
+      lctx.setTransform(layerDpr, 0, 0, layerDpr, 0, 0);
+      lctx.clearRect(0, 0, this.worldWidth, this.height);
+      return { layer, lctx };
+    }
+
+    // 背景签名：主题/世界尺寸/DPR 任一变化才重建；天气粒子是动态层，不进签名。
+    _ensureBgLayer() {
+      const key = `${environment.theme}|${Math.round(this.worldWidth)}|${Math.round(this.height)}|${this.dpr}`;
+      if (this._bgLayer && key === this._bgLayerKey) return;
+      const { lctx } = this._ensureLayerSlot('_bgLayer');
+      environment.drawStaticBackground(lctx, this.worldWidth, this.height);
+      this._bgLayerKey = key;
+    }
+
+    // 静态家具签名：类型/位置/尺寸以及世界尺寸与 DPR。新增、移除、resize 都会失效重建。
+    _staticFurnitureKey() {
+      const parts = [`${Math.round(this.worldWidth)}|${Math.round(this.height)}|${this.dpr}`];
+      for (const f of this.furniture) {
+        if (!this._isBakedFurniture(f)) continue;
+        // 爬梯用 startX/startY 而非 x/y，取两者兼容，避免签名出现 NaN
+        const fx = Number.isFinite(f.x) ? f.x : (f.startX || 0);
+        const fy = Number.isFinite(f.y) ? f.y : (f.startY || 0);
+        parts.push(`${f.type}:${Math.round(fx * 4)}:${Math.round(fy * 4)}:${Math.round(this._halfWidth(f) * 4)}`);
+      }
+      return parts.join('|');
+    }
+
+    _ensureStaticFurnitureLayer() {
+      const key = this._staticFurnitureKey();
+      if (this._staticFurnitureLayer && key === this._staticFurnitureLayerKey) return;
+      const { lctx } = this._ensureLayerSlot('_staticFurnitureLayer');
+      for (const f of this.furniture) {
+        if (!this._isBakedFurniture(f)) continue;
+        // 烘焙前同步一次 update（如 Scratcher 的 y 依赖 floorY）；主循环还会再 update，
+        // 但这三种类型的 update 是幂等的，只同步 y / 清理失效 occupant，无跨对象副作用。
+        f.update(this.worldWidth, this.height, this);
+        f.draw(lctx);
+      }
+      this._staticFurnitureLayerKey = key;
+    }
+
+    // 只把当前可见的世界切片 blit 到主画布，减少填充率。
+    // 源矩形按 dpr 换算到后备像素，目标用世界 CSS 像素；主 ctx 已有 dpr + zoom + 相机变换，
+    // zoom=1 时源像素与目标像素 1:1，不会模糊；相机平移只改变目标位置，不会错位。
+    _drawCachedLayer(ctx, layer) {
+      if (!layer) return;
+      const r = this._visibleRange;
+      const x0 = Math.max(0, Math.floor(r.left));
+      const x1 = Math.min(this.worldWidth, Math.ceil(r.right));
+      if (x1 <= x0) return;
+      const sourceDpr = layer._cacheDpr || 1;
+      ctx.drawImage(layer, x0 * sourceDpr, 0, (x1 - x0) * sourceDpr, layer.height,
+        x0, 0, x1 - x0, this.height);
+    }
+
     // --- 主帧渲染循环 ---
     loop() {
       const { ctx, viewportWidth, viewportHeight, worldWidth, height } = this;
+
+      // 帧时间步（秒）：传给猫的状态机做帧率解耦。首帧或时钟异常时回退到名义帧，
+      // 上限 0.05s 防止切回标签页后一帧推进过多导致行为跳变。
+      const nowMs = (typeof performance !== 'undefined' && performance.now)
+        ? performance.now() : Date.now();
+      const dt = this._lastFrameTime
+        ? MathUtils.clamp((nowMs - this._lastFrameTime) / 1000, 1 / 1000, 0.05)
+        : 1 / 60;
+      this._lastFrameTime = nowMs;
+      this.dt = dt;
+
+      // 喵视角：在插值之前更新目标镜头，让跟随平滑且不被手动平移抢走
+      if (this.catCam) {
+        if (this.cats.indexOf(this.catCam) === -1) {
+          this.catCam = null;
+        } else {
+          const maxCamX = Math.max(0, this.worldWidth - this.viewportWidth / this.zoom);
+          this.targetCameraX = MathUtils.clamp(
+            this.catCam.x - this.viewportWidth / (2 * this.zoom), 0, maxCamX);
+        }
+      }
 
       // 1. 相机与缩放平滑插值 (Lerp Smoothing)
       this.cameraX = MathUtils.lerp(this.cameraX, this.targetCameraX, 0.1);
       this.zoom = MathUtils.lerp(this.zoom, this.targetZoom, 0.08);
 
-      // 清屏
+      // 每帧重置变换到设备像素坐标系：clearRect 必须以 CSS 像素尺寸覆盖整个后备缓冲
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       ctx.clearRect(0, 0, viewportWidth, viewportHeight);
 
       // --- 进入世界相机空间变换 ---
@@ -763,39 +944,61 @@
       ctx.scale(this.zoom, this.zoom);
       ctx.translate(-this.cameraX, 0);
 
-      // 2. 背景与天气系统 (覆盖整座 3000px 豪宅世界)
-      environment.update(worldWidth, height);
-      environment.drawBackground(ctx, worldWidth, height);
+      // 当前可见世界 x 范围（含安全余量），只用于绘制裁剪，不参与任何物理/交互计算
+      this._refreshVisibleRange();
 
-      // 3. 阳光光束
+      // 2. 背景与天气系统 (覆盖整座 3000px 豪宅世界)
+      // 取舍：静态背景烘焙到离屏层，命中缓存时只 drawImage；天气粒子逐帧动态绘制。
+      environment.update(worldWidth, height);
+      this._ensureBgLayer();
+      this._drawCachedLayer(ctx, this._bgLayer);
+      environment.drawWeatherParticles(ctx, worldWidth, height);
+
+      // 3. 阳光光束 (动态，始终绘制)
       if (this.sunbeam && environment.theme !== 'cyber_neon') {
         this.sunbeam.update(worldWidth, height);
-        this.sunbeam.draw(ctx, height);
+        this.sunbeam.draw(ctx);
       }
 
-      // 4. 家具更新与绘制 (支持扫地机推物碰撞与智能自动出粮)
+      // 4. 静态家具层：只烘焙无动画的跳台/爬梯/抓板，命中缓存后 drawImage
+      this._ensureStaticFurnitureLayer();
+      this._drawCachedLayer(ctx, this._staticFurnitureLayer);
+
+      // 5. 家具更新与绘制 (支持扫地机推物碰撞与智能自动出粮)
+      // 取舍：所有家具的 update 必须逐帧执行——投喂机出粮、Roomba 推物等有跨对象副作用；
+      //      仅对可见的、未烘焙的家具调用 draw，烘焙类型已在上面整层绘制，不重复画。
       for (let f of this.furniture) {
         f.update(worldWidth, height, this);
-        f.draw(ctx);
+        if (this._isBakedFurniture(f)) continue;
+        if (this._isVisibleX(f.x, this._halfWidth(f))) f.draw(ctx);
       }
 
-      // 5. 玩具更新与绘制
+      // 6. 玩具更新与绘制；过期水洼及时回收，避免数组只增不减
+      // 取舍：回收 splice 与 update 全部保留，仅裁剪 draw。
       for (let i = this.toys.length - 1; i >= 0; i--) {
         const t = this.toys[i];
+        if (t && t.isExpired && t.isExpired()) {
+          this.toys.splice(i, 1);
+          continue;
+        }
+        if (!t) { this.toys.splice(i, 1); continue; }
         t.update(worldWidth, height, this);
-        t.draw(ctx);
+        if (this._isVisibleX(t.x, this._halfWidth(t))) t.draw(ctx);
       }
+      if (this.toys.length > MAX_TOYS) this.toys.splice(0, this.toys.length - MAX_TOYS);
+      if (this.furniture.length > MAX_FURNITURE) this.furniture.splice(0, this.furniture.length - MAX_FURNITURE);
 
-      // 6. 猫咪更新与绘制 (分层渲染确保交互自然)
+      // 7. 猫咪更新与绘制 (分层渲染确保交互自然)
+      // 取舍：猫的 update 负责吃鱼 splice / 骑行 / 附着状态，全部执行；被拖拽的猫强制绘制。
       for (let c of this.cats) {
         c.update(worldWidth, height, this);
-        c.draw(ctx);
+        if (c === this.mouse.draggedCat || this._isVisibleX(c.x, (c.radius || 22) + 40)) c.draw(ctx);
       }
 
-      // 7. 逗猫棒
+      // 8. 逗猫棒
       featherWand.draw(ctx);
 
-      // 8. 激光红点
+      // 9. 激光红点
       if (this.laser.active) {
         ctx.save();
         ctx.beginPath();
@@ -812,7 +1015,7 @@
         ctx.restore();
       }
 
-      // 9. 漂浮粒子与爱心
+      // 10. 漂浮粒子与爱心：物理推进与回收对所有粒子执行，仅裁剪绘制
       for (let i = this.particles.length - 1; i >= 0; i--) {
         const p = this.particles[i];
         p.x += p.vx;
@@ -820,17 +1023,19 @@
         p.alpha -= 0.02;
         p.scale += 0.012;
 
-        ctx.save();
-        ctx.globalAlpha = Math.max(0, p.alpha);
-        ctx.font = `${Math.floor(18 * p.scale)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.fillText(p.text, p.x, p.y);
-        ctx.restore();
+        if (this._isVisibleX(p.x, 60)) {
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, p.alpha);
+          ctx.font = `${Math.floor(18 * p.scale)}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.fillText(p.text, p.x, p.y);
+          ctx.restore();
+        }
 
         if (p.alpha <= 0) this.particles.splice(i, 1);
       }
 
-      // 10. 红点挑战模式目标点绘制 (在世界坐标系内)
+      // 11. 红点挑战模式目标点绘制 (在世界坐标系内)
       uiManager.updateChallenge(this.cats, this);
       uiManager.drawChallengeTarget(ctx);
 

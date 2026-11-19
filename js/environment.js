@@ -14,6 +14,20 @@
       this.rainDrops = [];
       this.sunbeamX = 300;
       this.timeOfDay = 0.7; // 0.0 - 1.0
+      // 赛博飞鸟 / 窗外蜂鸟 (供猫咪视线追踪与 Ek-ek 齿颤)
+      this.bird = {
+        active: true,
+        x: -40,
+        y: 110,
+        vx: 2.2,
+        wingPhase: 0,
+        spawnCooldown: 60
+      };
+      // 凌晨三点狂飙暴走状态
+      this.midnightZoomies = false;
+      this.zoomiesTimer = 0;
+      // 背景与灯光渐变缓存：仅在主题或视口尺寸变化时重建，避免每帧创建 CanvasGradient
+      this._bgCache = { key: '', gradient: null, glows: null };
       this.initParticles(60);
     }
 
@@ -42,6 +56,15 @@
       return this.weather;
     }
 
+    getBird() {
+      return (this.bird && this.bird.active) ? this.bird : null;
+    }
+
+    triggerMidnightZoomies() {
+      this.midnightZoomies = true;
+      this.zoomiesTimer = 480; // 8 秒暴走
+    }
+
     update(width, height) {
       // 粒子更新
       this.dustParticles.forEach(p => {
@@ -51,6 +74,34 @@
         if (p.x < 0) p.x = width;
         if (p.x > width) p.x = 0;
       });
+
+      // 窗外赛博小鸟飞掠逻辑
+      if (this.bird.active) {
+        this.bird.x += this.bird.vx;
+        this.bird.wingPhase += 0.35;
+        this.bird.y = 80 + Math.sin(this.bird.x * 0.008) * 35;
+        if (this.bird.x > width + 60) {
+          this.bird.active = false;
+          this.bird.spawnCooldown = 300 + Math.floor(Math.random() * 400);
+        }
+      } else {
+        if (this.bird.spawnCooldown > 0) {
+          this.bird.spawnCooldown--;
+        } else {
+          this.bird.active = true;
+          this.bird.x = -50;
+          this.bird.y = 70 + Math.random() * 60;
+          this.bird.vx = 2.0 + Math.random() * 1.5;
+        }
+      }
+
+      // 凌晨暴走倒计时
+      if (this.midnightZoomies) {
+        this.zoomiesTimer--;
+        if (this.zoomiesTimer <= 0) {
+          this.midnightZoomies = false;
+        }
+      }
 
       // 雨滴更新
       if (this.weather === 'rain') {
@@ -74,25 +125,51 @@
       }
     }
 
+    // 公开接口保持不变：静态背景 + 动态天气粒子，视觉行为与拆分前一致。
     drawBackground(ctx, width, height) {
+      this.drawStaticBackground(ctx, width, height);
+      this.drawWeatherParticles(ctx, width, height);
+    }
+
+    // 静态背景层：只依赖主题、尺寸与 _bgCache，可安全烘焙到离屏 canvas。
+    drawStaticBackground(ctx, width, height) {
       ctx.save();
 
-      // 主背景渐变
-      if (this.theme === 'sunny_day') {
-        const skyGrad = ctx.createLinearGradient(0, 0, 0, height);
-        skyGrad.addColorStop(0, '#74b9ff');
-        skyGrad.addColorStop(0.7, '#dfe6e9');
-        skyGrad.addColorStop(1, '#ffeaa7');
-        ctx.fillStyle = skyGrad;
-        ctx.fillRect(0, 0, width, height);
-      } else if (this.theme === 'cyber_neon') {
-        const neonGrad = ctx.createRadialGradient(width / 2, height / 2, 80, width / 2, height / 2, Math.max(width, height));
-        neonGrad.addColorStop(0, '#191929');
-        neonGrad.addColorStop(0.6, '#0f0c1b');
-        neonGrad.addColorStop(1, '#05030a');
-        ctx.fillStyle = neonGrad;
-        ctx.fillRect(0, 0, width, height);
+      // 渐变只依赖主题与视口尺寸，命中缓存后直接复用
+      const cacheKey = `${this.theme}|${Math.round(width)}|${Math.round(height)}`;
+      if (this._bgCache.key !== cacheKey) {
+        const isDay = this.theme === 'sunny_day';
+        let gradient;
+        if (this.theme === 'sunny_day') {
+          gradient = ctx.createLinearGradient(0, 0, 0, height);
+          gradient.addColorStop(0, '#74b9ff');
+          gradient.addColorStop(0.7, '#dfe6e9');
+          gradient.addColorStop(1, '#ffeaa7');
+        } else if (this.theme === 'cyber_neon') {
+          gradient = ctx.createRadialGradient(width / 2, height / 2, 80, width / 2, height / 2, Math.max(width, height));
+          gradient.addColorStop(0, '#191929');
+          gradient.addColorStop(0.6, '#0f0c1b');
+          gradient.addColorStop(1, '#05030a');
+        } else {
+          gradient = ctx.createRadialGradient(width / 2, height * 0.4, 100, width / 2, height * 0.5, Math.max(width, height));
+          gradient.addColorStop(0, '#222336');
+          gradient.addColorStop(0.7, '#141421');
+          gradient.addColorStop(1, '#0b0b12');
+        }
+        this._bgCache.gradient = gradient;
+        this._bgCache.glows = [500, 1480, 2500].map(lx => {
+          const glow = ctx.createRadialGradient(lx, 95, 4, lx, 110, 70);
+          glow.addColorStop(0, isDay ? 'rgba(254, 202, 87, 0.28)' : 'rgba(254, 202, 87, 0.16)');
+          glow.addColorStop(1, 'rgba(254, 202, 87, 0)');
+          return glow;
+        });
+        this._bgCache.key = cacheKey;
+      }
 
+      ctx.fillStyle = this._bgCache.gradient;
+      ctx.fillRect(0, 0, width, height);
+
+      if (this.theme === 'cyber_neon') {
         // 赛博霓虹网格
         ctx.strokeStyle = 'rgba(255, 0, 128, 0.08)';
         ctx.lineWidth = 1;
@@ -102,14 +179,6 @@
           ctx.lineTo(width, y);
           ctx.stroke();
         }
-      } else {
-        // cozy_night (默认温馨深色)
-        const nightGrad = ctx.createRadialGradient(width / 2, height * 0.4, 100, width / 2, height * 0.5, Math.max(width, height));
-        nightGrad.addColorStop(0, '#222336');
-        nightGrad.addColorStop(0.7, '#141421');
-        nightGrad.addColorStop(1, '#0b0b12');
-        ctx.fillStyle = nightGrad;
-        ctx.fillRect(0, 0, width, height);
       }
 
       // 物理地板与室内空间分区
@@ -134,7 +203,7 @@
       });
 
       // 三大分区高空气质小吊灯 (Pendant Ambient Lamps)
-      [500, 1480, 2500].forEach(lx => {
+      [500, 1480, 2500].forEach((lx, gi) => {
         // 细吊线
         ctx.strokeStyle = isDay ? '#a0522d' : '#4b6584';
         ctx.lineWidth = 1;
@@ -153,11 +222,8 @@
         ctx.closePath();
         ctx.fill();
 
-        // 柔和环境光晕
-        const glowGrad = ctx.createRadialGradient(lx, 95, 4, lx, 110, 70);
-        glowGrad.addColorStop(0, isDay ? 'rgba(254, 202, 87, 0.28)' : 'rgba(254, 202, 87, 0.16)');
-        glowGrad.addColorStop(1, 'rgba(254, 202, 87, 0)');
-        ctx.fillStyle = glowGrad;
+        // 柔和环境光晕（复用缓存渐变）
+        ctx.fillStyle = this._bgCache.glows[gi];
         ctx.beginPath();
         ctx.arc(lx, 110, 70, 0, Math.PI * 2);
         ctx.fill();
@@ -218,20 +284,30 @@
         ctx.fillRect(width / 2 + i, rugY + rugH - 2, 2, 4);
       }
 
-      // 飘浮微尘 / 萤火虫
+      ctx.restore();
+    }
+
+    // 动态天气粒子层：微尘/雨滴每帧位置都会变，单独绘制以免被静态背景缓存冻结。
+    drawWeatherParticles(ctx, width, height) {
+      ctx.save();
+
+      // 飘浮微尘 / 萤火虫：阴影状态按天气设置一次，避免逐粒子切换昂贵状态
+      const isFirefly = this.weather === 'fireflies';
+      if (isFirefly) {
+        ctx.shadowColor = '#f1c40f';
+        ctx.shadowBlur = 8;
+      } else {
+        ctx.shadowBlur = 0;
+      }
       this.dustParticles.forEach(p => {
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-        if (this.weather === 'fireflies') {
-          ctx.fillStyle = `rgba(241, 196, 15, ${p.alpha * 1.5})`;
-          ctx.shadowColor = '#f1c40f';
-          ctx.shadowBlur = 8;
-        } else {
-          ctx.fillStyle = `rgba(255, 255, 255, ${p.alpha * 0.4})`;
-          ctx.shadowBlur = 0;
-        }
+        ctx.fillStyle = isFirefly
+          ? `rgba(241, 196, 15, ${p.alpha * 1.5})`
+          : `rgba(255, 255, 255, ${p.alpha * 0.4})`;
         ctx.fill();
       });
+      ctx.shadowBlur = 0;
 
       // 雨丝
       if (this.weather === 'rain') {
@@ -243,6 +319,33 @@
           ctx.lineTo(r.x - 3, r.y + r.len);
         });
         ctx.stroke();
+      }
+
+      // 窗外赛博飞鸟
+      if (this.bird && this.bird.active) {
+        ctx.save();
+        ctx.translate(this.bird.x, this.bird.y);
+        const wingY = Math.sin(this.bird.wingPhase) * 6;
+        ctx.fillStyle = '#48dbfb';
+        ctx.beginPath();
+        // 鸟身
+        ctx.ellipse(0, 0, 7, 3.5, 0.1, 0, Math.PI * 2);
+        ctx.fill();
+        // 扇动双翼
+        ctx.strokeStyle = '#0abde3';
+        ctx.lineWidth = 1.8;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(-2, 0);
+        ctx.lineTo(2, -wingY);
+        ctx.lineTo(7, 0);
+        ctx.stroke();
+        // 微光
+        ctx.fillStyle = 'rgba(72, 219, 251, 0.4)';
+        ctx.beginPath();
+        ctx.arc(0, 0, 10, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
       }
 
       ctx.restore();

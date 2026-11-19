@@ -1,13 +1,34 @@
 /**
  * CyberMeow - 自动化逻辑与语法校验测试套件
+ *
+ * 所有用例均使用 Node assert 做真实断言：失败会累计并使进程以退出码 1 结束。
+ * 运行方式：node tests/verify.js
  */
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const assert = require('assert');
+
+const basePath = path.resolve(__dirname, '..');
+let passed = 0;
+let failed = 0;
+
+function test(name, fn) {
+  try {
+    fn();
+    passed++;
+    console.log(`✅ ${name}`);
+  } catch (err) {
+    failed++;
+    console.error(`❌ ${name}\n   ${err && err.message ? err.message : err}`);
+  }
+}
 
 console.log('🐾 开始运行 CyberMeow 自动化逻辑验证测试...\n');
 
-// 1. 语法检查
+// ---------------------------------------------------------------------------
+// 1. 语法检查：全部 JS 文件必须能被 V8 编译
+// ---------------------------------------------------------------------------
 const filesToTest = [
   'js/physics.js',
   'js/audio.js',
@@ -19,26 +40,17 @@ const filesToTest = [
   'js/app.js'
 ];
 
-const basePath = path.resolve(__dirname, '..');
-let allSyntaxPassed = true;
-
 filesToTest.forEach(relPath => {
-  const fullPath = path.join(basePath, relPath);
-  try {
-    const code = fs.readFileSync(fullPath, 'utf8');
-    new vm.Script(code); // 编译检查 JS 语法
-    console.log(`✅ [语法检查通过] ${relPath}`);
-  } catch (err) {
-    console.error(`❌ [语法错误] ${relPath}:`, err.message);
-    allSyntaxPassed = false;
-  }
+  test(`语法检查 ${relPath}`, () => {
+    const code = fs.readFileSync(path.join(basePath, relPath), 'utf8');
+    assert.doesNotThrow(() => new vm.Script(code), '存在语法错误');
+  });
 });
 
-if (!allSyntaxPassed) {
-  process.exit(1);
-}
-
-// 2. 模拟运行核心逻辑 (Mock 浏览器环境)
+// ---------------------------------------------------------------------------
+// 2. 模拟浏览器环境，按运行时顺序加载核心模块
+// ---------------------------------------------------------------------------
+const noop = () => {};
 const mockWindow = {
   innerWidth: 1920,
   innerHeight: 1080,
@@ -50,11 +62,33 @@ const mockWindow = {
       currentTime: 0,
       sampleRate: 44100,
       destination: {},
-      createGain: () => ({ gain: { value: 1, setValueAtTime: ()=>{}, linearRampToValueAtTime: ()=>{}, exponentialRampToValueAtTime: ()=>{} }, connect: ()=>{} }),
-      createOscillator: () => ({ frequency: { setValueAtTime: ()=>{}, exponentialRampToValueAtTime: ()=>{}, linearRampToValueAtTime: ()=>{} }, connect: ()=>{}, start: ()=>{}, stop: ()=>{} }),
-      createBiquadFilter: () => ({ frequency: { setValueAtTime: ()=>{}, exponentialRampToValueAtTime: ()=>{} }, Q: { value: 1 }, connect: ()=>{} }),
+      resume: noop,
+      createGain: () => ({
+        gain: {
+          value: 1,
+          setValueAtTime: noop,
+          linearRampToValueAtTime: noop,
+          exponentialRampToValueAtTime: noop,
+          cancelScheduledValues: noop
+        },
+        connect: noop,
+        disconnect: noop
+      }),
+      createOscillator: () => ({
+        frequency: { value: 440, setValueAtTime: noop, exponentialRampToValueAtTime: noop, linearRampToValueAtTime: noop, cancelScheduledValues: noop },
+        connect: noop,
+        disconnect: noop,
+        start: noop,
+        stop: noop
+      }),
+      createBiquadFilter: () => ({
+        frequency: { value: 1000, setValueAtTime: noop, exponentialRampToValueAtTime: noop },
+        Q: { value: 1 },
+        connect: noop,
+        disconnect: noop
+      }),
       createBuffer: (c, len, rate) => ({ getChannelData: () => new Float32Array(len) }),
-      createBufferSource: () => ({ connect: ()=>{}, start: ()=>{}, stop: ()=>{} })
+      createBufferSource: () => ({ connect: noop, disconnect: noop, start: noop, stop: noop })
     };
   },
   localStorage: {
@@ -62,237 +96,402 @@ const mockWindow = {
     getItem(k) { return this.data[k] || null; },
     setItem(k, v) { this.data[k] = v; }
   },
-  addEventListener: () => {}
+  addEventListener: noop
 };
 
 mockWindow.window = mockWindow;
-
 const context = vm.createContext(mockWindow);
-
-// 按序载入物理与猫咪核心
 const loadInVm = (relPath) => {
-  const code = fs.readFileSync(path.join(basePath, relPath), 'utf8');
-  vm.runInContext(code, context);
+  vm.runInContext(fs.readFileSync(path.join(basePath, relPath), 'utf8'), context);
 };
 
-loadInVm('js/physics.js');
-loadInVm('js/audio.js');
-loadInVm('js/furniture.js');
-loadInVm('js/toys.js');
-loadInVm('js/cat.js');
+['js/physics.js', 'js/audio.js', 'js/furniture.js', 'js/toys.js', 'js/cat.js'].forEach(loadInVm);
 
+const CyberMeow = mockWindow.CyberMeow;
+const { VerletChain, Cat, BREEDS, Roomba, YarnBall, CardboardBox, AGENDAS, WaterPuddle } = CyberMeow;
+
+// ---------------------------------------------------------------------------
+// 3. 物理与状态机基础
+// ---------------------------------------------------------------------------
 console.log('\n🐾 正在测试物理链与猫咪状态机运算...');
 
-const { VerletChain, Cat, BREEDS, Roomba, YarnBall, CardboardBox } = mockWindow.CyberMeow;
+test('Verlet 物理链积分与根节点锚定', () => {
+  const chain = new VerletChain(100, 100, 5, 10);
+  chain.update(120, 120, 0.1, 0.95);
+  assert.strictEqual(chain.points.length, 5);
+  assert.strictEqual(chain.points[0].x, 120);
+  assert.strictEqual(chain.points[0].y, 120);
+  chain.points.slice(1).forEach(p => {
+    assert.ok(Number.isFinite(p.x) && Number.isFinite(p.y), '物理链出现 NaN');
+  });
+});
 
-// 测试 Verlet 链
-const chain = new VerletChain(100, 100, 5, 10);
-chain.update(120, 120, 0.1, 0.95);
-if (chain.points.length === 5 && typeof chain.points[4].x === 'number') {
-  console.log('✅ [Verlet 物理链测试通过]');
-} else {
-  console.error('❌ [Verlet 物理链测试失败]');
-  process.exit(1);
-}
-
-// 测试猫咪生成与步进更新
 const testCat = new Cat(500, 500, { breed: BREEDS[0] });
 const mockScene = {
   laser: { active: true, x: 550, y: 500 },
   featherWand: { active: false },
   toys: [new YarnBall(400, 500)],
   furniture: [new Roomba(600, 500), new CardboardBox(700, 500)],
-  spawnParticle: () => {}
+  cats: [],
+  spawnParticle: noop
 };
 
-testCat.update(1920, 1080, mockScene);
-console.log(`✅ [猫咪实体生成正常] 名字: ${testCat.name}, 品种: ${testCat.breed.name}, 当前状态: ${testCat.state}`);
+test('猫咪实体生成与首帧更新', () => {
+  assert.doesNotThrow(() => testCat.update(1920, 1080, mockScene));
+  assert.ok(testCat.name && testCat.breed, '缺少名字或品种');
+  assert.strictEqual(typeof testCat.state, 'string');
+  console.log(`     名字: ${testCat.name}, 品种: ${testCat.breed.name}, 状态: ${testCat.state}`);
+});
 
-// 测试吃鱼干逻辑
-const fish = new (mockWindow.CyberMeow.FishTreat)(testCat.x + 5, testCat.y);
-mockScene.toys.push(fish);
-mockScene.laser.active = false;
-testCat.update(1920, 1080, mockScene);
+test('捕食传感器优先锁定激光红点', () => {
+  const target = testCat.evaluateSensors(mockScene);
+  assert.ok(target && target.type === 'laser', `期望 laser，实际: ${target && target.type}`);
+});
 
-console.log('✅ [猫咪捕食传感器评估通过]');
+test('长条液体猫抓取拉伸', () => {
+  testCat.isGrabbed = true;
+  testCat.update(1920, 1080, mockScene);
+  assert.strictEqual(testCat.state, 'grabbed');
+  assert.ok(testCat.grabStretch > 1.0, `拉长系数未生效: ${testCat.grabStretch}`);
+  console.log(`     拉长系数: ${testCat.grabStretch.toFixed(2)}`);
+  testCat.isGrabbed = false;
+});
 
-// --- 新增深度单点与交叉度测试 ---
+// ---------------------------------------------------------------------------
+// 4. 家具、道具与社交交叉
+// ---------------------------------------------------------------------------
 console.log('\n🐾 正在测试新增深度点与多猫社交交叉...');
 
-// 1. 测试长条液体猫拉伸 (Scruff grab)
-testCat.isGrabbed = true;
-testCat.update(1920, 1080, mockScene);
-if (testCat.state === 'grabbed' && testCat.grabStretch > 1.0) {
-  console.log(`✅ [长条液体猫拉伸测试通过] 抓起拉长系数: ${testCat.grabStretch.toFixed(2)}`);
-} else {
-  console.error('❌ [长条液体猫拉伸测试失败]');
+test('多猫社交接口返回布尔且不抛异常', () => {
+  const catB = new Cat(testCat.x + 20, testCat.y);
+  mockScene.cats = [testCat, catB];
+  let interacted;
+  assert.doesNotThrow(() => { interacted = testCat.checkSocialInteraction(mockScene); });
+  assert.strictEqual(typeof interacted, 'boolean');
+  console.log(`     社交触发结果: ${interacted}`);
+});
+
+test('扫地机刚体推撞道具', () => {
+  const roomba = new Roomba(400, 500);
+  const yarn = new YarnBall(410, 500);
+  yarn.x = roomba.x + 10;
+  yarn.y = roomba.y;
+  yarn.vx = 0;
+  yarn.vy = 0;
+  mockScene.toys = [yarn];
+  roomba.update(1920, 1080, mockScene);
+  assert.ok(yarn.vx > 3, `毛线球未被推开: vx=${yarn.vx}`);
+  console.log(`     被撞飞初速度: ${yarn.vx.toFixed(2)}`);
+});
+
+test('猫猫纸箱装甲车冲刺状态', () => {
+  const box = new CardboardBox(300, 500);
+  box.triggerArmoredTank(1);
+  box.update(1920, 1080);
+  assert.strictEqual(box.isArmoredTank, true);
+  assert.ok(box.vx > 0, `冲刺速度异常: ${box.vx}`);
+  console.log(`     冲刺速度: ${box.vx.toFixed(2)}`);
+});
+
+test('高台贱爪推物判定', () => {
+  testCat.perchedTier = { x: 500, y: 400, w: 120 };
+  testCat.x = 500;
+  testCat.y = 400;
+  mockScene.toys = [new YarnBall(520, 400)];
+  const result = testCat.checkHighPerchSwat(mockScene);
+  assert.strictEqual(result, true, '推物判定未触发');
+});
+
+test('智能自动投喂机出粮', () => {
+  const feeder = new CyberMeow.SmartFeeder(600, 500);
+  const before = mockScene.toys.length;
+  feeder.dispense(mockScene);
+  assert.strictEqual(mockScene.toys.length, before + 1, '未生成小鱼干');
+  assert.strictEqual(mockScene.toys[mockScene.toys.length - 1].type, 'fish');
+});
+
+test('猫生战术大计注册表完整', () => {
+  assert.ok(AGENDAS && AGENDAS.THRONEC_QUEST && AGENDAS.FEEDER_CAMP && AGENDAS.STEALTH_HUNT);
+  assert.strictEqual(Object.keys(AGENDAS).length, 10, '大计数量不是 10');
+  console.log(`     已注册大计数量: ${Object.keys(AGENDAS).length}`);
+});
+
+test('猫咪拍打黑客投喂机', () => {
+  const feeder = new CyberMeow.SmartFeeder(600, 500);
+  feeder.receiveTap(testCat, mockScene);
+  assert.ok(feeder.shakeTimer > 0, '未触发震颤反馈');
+});
+
+test('水洼生命周期与过期回收接口', () => {
+  const puddle = new WaterPuddle(500, 500);
+  assert.strictEqual(puddle.isExpired(), false);
+  puddle.update(1920, 1080, mockScene);
+  assert.strictEqual(puddle.life, 599, '生命值未按帧递减');
+  puddle.life = 0;
+  assert.strictEqual(puddle.isExpired(), true, '过期判定失效');
+  assert.strictEqual(puddle.contains(500, 500), false, '过期水洼仍可被踩中');
+});
+
+test('心机碰瓷肚皮陷阱爱情暴击', () => {
+  const cat = new Cat(500, 500, { breed: BREEDS[0] });
+  cat.state = 'belly_trap';
+  cat.bellyTrapPatience = 10;
+  cat.pet(mockScene);
+  assert.strictEqual(cat.state, 'idle', '未进入弹射逃逸状态');
+  assert.ok(Math.abs(cat.vx) > 3, `逃逸初速度异常: ${cat.vx}`);
+  console.log(`     逃逸初速度: ${cat.vx.toFixed(2)}`);
+});
+
+test('王座对决结算与双方引用清理', () => {
+  const challenger = new Cat(500, 500, { breed: BREEDS[0] });
+  const defender = new Cat(520, 500, { breed: BREEDS[1] });
+  challenger.rival = defender;
+  defender.rival = challenger;
+  challenger.resolveThroneChallenge(mockScene);
+  assert.ok(defender.vy < 0 && Math.abs(defender.vx) > 0, '败者未被击落');
+  assert.strictEqual(defender.rival, null, '败者对手引用未清理');
+  assert.strictEqual(challenger.rival, null, '胜者对手引用未清理');
+  console.log(`     败者弹飞: vy=${defender.vy}, vx=${defender.vx}`);
+});
+
+test('缺少对手引用的对决状态可兜底退出', () => {
+  const lonely = new Cat(500, 500, { breed: BREEDS[0] });
+  lonely.state = 'throne_challenge';
+  lonely.rival = null;
+  lonely.resolveThroneChallenge(mockScene);
+  assert.strictEqual(lonely.state, 'idle', '对决状态永久卡死');
+});
+
+let sharedCatTree;
+test('猫爬架吊球物理拍打', () => {
+  const catTree = new CyberMeow.CatTree(800, 500);
+  sharedCatTree = catTree;
+  mockScene.furniture = [catTree];
+  catTree.batDangleBall(1);
+  assert.ok(Math.abs(catTree.dangleBall.vx) > 0, '吊球未被拨动');
+  console.log(`     吊球摆动初速度: ${catTree.dangleBall.vx.toFixed(2)}`);
+
+  testCat.currentAgenda = AGENDAS.TREE_CLIMB;
+  testCat.agendaTarget = catTree;
+  testCat.agendaPhase = 0;
+  testCat.x = 800;
+  testCat.y = 500;
+  testCat.runAgenda(1920, 1080, mockScene);
+  assert.ok(testCat.agendaPhase >= 1, '阶梯攀爬大计未推进');
+  console.log(`     推进阶段: ${testCat.agendaPhase}, 状态: ${testCat.state}`);
+});
+
+test('纵向起跳极限速度解禁', () => {
+  testCat.state = 'jumping';
+  testCat.vy = -12.5;
+  testCat.update(1920, 1080, mockScene);
+  assert.ok(testCat.vy <= -10.0, `起跳速度被异常钳制: ${testCat.vy}`);
+  console.log(`     飞跃速度: ${testCat.vy.toFixed(2)}`);
+});
+
+test('猫爬架跳台精准停靠', () => {
+  const catTree = sharedCatTree;
+  mockScene.furniture = [catTree];
+  testCat.x = catTree.x + catTree.tiers[0].xOffset;
+  testCat.y = catTree.y + catTree.tiers[0].yOffset - testCat.radius - 2;
+  testCat.vy = 1.5;
+  testCat.update(1920, 1080, mockScene);
+  assert.strictEqual(testCat.perchedTier, catTree.tiers[0], '未停靠到下层跳台');
+  testCat.perchedTier = null;
+});
+
+test('空中猫道悬索桥结构', () => {
+  const bridge = new CyberMeow.CatSuspensionBridge(1500, 300, 280);
+  bridge.update(1920, 1080, mockScene);
+  // 快照在 update 之后获取，避免断言用到过期对象
+  const surfaces = bridge.getPerchSurfaces();
+  assert.ok(surfaces.length > 0 && surfaces[0].type === 'bridge');
+  assert.strictEqual(bridge.plankCount, 11);
+  console.log(`     桥跨度: ${bridge.w}px, 木板数量: ${bridge.plankCount}`);
+});
+
+test('空中全景吊床摆动与立足判定', () => {
+  const hammock = new CyberMeow.AerialHammock(1500, 200, 115);
+  hammock.nudge(0.12);
+  hammock.update(1920, 1080, mockScene);
+  const surfaces = hammock.getPerchSurfaces();
+  assert.ok(surfaces.length > 0 && surfaces[0].type === 'hammock');
+  assert.ok(Math.abs(hammock.swaySpeed) > 0, '吊床未产生摆动');
+  console.log(`     摆动初速度: ${hammock.swaySpeed.toFixed(3)}`);
+});
+
+test('阶梯式猫步道多级踏板', () => {
+  const ladder = new CyberMeow.WallClimbLadder(1000, 500, 3);
+  assert.strictEqual(ladder.getPerchSurfaces().length, 3);
+});
+
+test('天花板风铃羽毛球谐振阻尼', () => {
+  const ceilingToy = new CyberMeow.CeilingDanglingToy(1500, 180);
+  ceilingToy.batToy(5, -6);
+  ceilingToy.update(1920, 1080);
+  assert.ok(Math.abs(ceilingToy.vy) > 0 || Math.abs(ceilingToy.vx) > 0, '未产生回弹');
+  console.log(`     回弹初速度: vy=${ceilingToy.vy.toFixed(2)}, vx=${ceilingToy.vx.toFixed(2)}`);
+});
+
+test('飞天巡视战术大计推进', () => {
+  const bridge = new CyberMeow.CatSuspensionBridge(1500, 300, 280);
+  testCat.currentAgenda = AGENDAS.AERIAL_PATROL;
+  testCat.agendaTarget = bridge;
+  testCat.agendaPhase = 0;
+  testCat.x = bridge.x - bridge.w / 2;
+  testCat.y = 500;
+  testCat.runAgenda(1920, 1080, mockScene);
+  assert.ok(testCat.agendaPhase >= 1, '飞天巡视大计未推进');
+  console.log(`     推进阶段: ${testCat.agendaPhase}, 状态: ${testCat.state}`);
+});
+
+test('高空空降跳杀蓄力与瞄准判定', () => {
+  const cat = new Cat(500, 200, { breed: BREEDS[0] });
+  cat.perchedTier = { x: 500, y: 200, w: 100 };
+  const victim = new Cat(520, 450, { breed: BREEDS[1] });
+  const scene = { cats: [cat, victim], furniture: [{ type: 'roomba', x: 530, y: 460 }], toys: [] };
+  const result = cat.checkAerialPounce(scene);
+  assert.strictEqual(result, true, '高空跳杀未触发');
+  assert.strictEqual(cat.state, 'aerial_pounce_aim', '未进入跳杀蓄力状态');
+  assert.ok(cat.aerialTarget, '未锁定跳杀目标');
+  console.log(`     跳杀锁定目标类型: ${cat.aerialTargetType}`);
+});
+
+test('吊桥狭路相逢猫猫拳对决', () => {
+  const bridge = new CyberMeow.CatSuspensionBridge(800, 300, 320);
+  const catA = new Cat(790, 300, { breed: BREEDS[0] });
+  const catB = new Cat(820, 300, { breed: BREEDS[1] });
+  catA.onBridge = bridge;
+  catB.onBridge = bridge;
+  const scene = { cats: [catA, catB], furniture: [bridge], toys: [] };
+  const duelTriggered = catA.checkBridgeDuel(scene);
+  assert.strictEqual(duelTriggered, true, '狭路相逢未触发');
+  assert.strictEqual(catA.state, 'bridge_duel');
+  assert.strictEqual(catB.state, 'bridge_duel');
+  console.log(`     对决状态: ${catA.state}, 意图: ${catA.intentIcon}`);
+});
+
+test('窗外赛博飞鸟视线追踪与齿颤', () => {
+  const cat = new Cat(300, 400, { breed: BREEDS[0] });
+  const scene = {
+    environment: {
+      getBird: () => ({ active: true, x: 350, y: 120 })
+    }
+  };
+  const chatterTriggered = cat.checkWindowBirdChatter(scene);
+  assert.strictEqual(chatterTriggered, true, '观鸟齿颤未触发');
+  assert.strictEqual(cat.state, 'chattering');
+  console.log(`     齿颤状态: ${cat.state}, 注视目标: x=${cat.lookTarget.x}`);
+});
+
+test('凌晨三点虚空狂飙暴走', () => {
+  const cat = new Cat(500, 500, { breed: BREEDS[0] });
+  cat.triggerMidnightZoomies(mockScene);
+  assert.strictEqual(cat.state, 'zoomies');
+  assert.ok(Math.abs(cat.vx) > 9.0, `狂飙速度不足: ${cat.vx}`);
+  console.log(`     暴走速度: ${cat.vx.toFixed(2)}`);
+});
+
+test('下一代 5 节脊椎与宝石眼无缝绘制', () => {
+  const { createBrowserMock } = require('./dom-mock');
+  const mock = createBrowserMock();
+  const ctx = mock.window.document.createElement('canvas').getContext('2d');
+  const cat = new Cat(500, 500, { breed: BREEDS[0] });
+  assert.doesNotThrow(() => {
+    cat.render(ctx, 1920, 1080);
+    cat.draw(ctx, 1920, 1080);
+  }, '新版渲染流水线执行抛异常');
+});
+
+// ---------------------------------------------------------------------------
+// 5. 本轮修复缺陷的回归用例
+// ---------------------------------------------------------------------------
+console.log('\n🐾 正在测试本轮修复的回归用例...');
+
+test('呼噜声重复 start 不会累积计数导致无法停止', () => {
+  const engine = CyberMeow.soundEngine;
+  engine.init();
+  engine.startPurr();
+  engine.startPurr();
+  engine.startPurr();
+  assert.strictEqual(engine.purrActiveCount, 1, '重复调用使计数虚高');
+  assert.ok(engine.purrSource, '未创建声源');
+  engine.stopPurr();
+  assert.strictEqual(engine.purrActiveCount, 0, '停止后计数未归零');
+});
+
+test('Web Audio 不可用时全部声音 API 安全降级', () => {
+  const miniWindow = { setTimeout: setTimeout, clearTimeout: clearTimeout };
+  miniWindow.window = miniWindow;
+  const miniContext = vm.createContext(miniWindow);
+  vm.runInContext(fs.readFileSync(path.join(basePath, 'js/audio.js'), 'utf8'), miniContext);
+  const engine = miniWindow.CyberMeow.soundEngine;
+  assert.doesNotThrow(() => {
+    engine.init();
+    engine.playMeow();
+    engine.playPop();
+    engine.startPurr();
+    engine.stopPurr();
+    engine.startRoomba();
+    engine.stopRoomba();
+  });
+  assert.strictEqual(engine.unavailable, true, '未进入降级模式');
+});
+
+test('纸箱与骑乘状态具备自然退出路径', () => {
+  const inBoxCat = new Cat(100, 100, { breed: BREEDS[0] });
+  const box = new CardboardBox(100, 100);
+  inBoxCat.inBox = box;
+  box.occupant = inBoxCat;
+  inBoxCat.state = 'in_box';
+  const scene = { cats: [inBoxCat], toys: [], furniture: [], spawnParticle: noop };
+  for (let i = 0; i < 601; i++) inBoxCat.update(1920, 1080, scene);
+  assert.strictEqual(inBoxCat.inBox, null, '猫永久卡在纸箱中');
+  assert.strictEqual(box.occupant, null, '纸箱永久被占用');
+});
+
+test('抓取时释放 heldYarn 引用', () => {
+  const grabber = new Cat(100, 100, { breed: BREEDS[0] });
+  const yarn = new YarnBall(100, 100);
+  grabber.heldYarn = yarn;
+  yarn.heldBy = grabber;
+  grabber.isGrabbed = true;
+  grabber.update(1920, 1080, mockScene);
+  assert.strictEqual(grabber.heldYarn, null, '抓取后仍持有毛线球');
+  assert.strictEqual(yarn.heldBy, null, '毛线球仍指向被抓取的猫');
+});
+
+test('激光挫败感随时间衰减', () => {
+  const cat = new Cat(100, 100, { breed: BREEDS[0] });
+  // 关掉激光，隔离「扑空 +0.22」的干扰，只验证衰减逻辑本身
+  const laserWasActive = mockScene.laser.active;
+  mockScene.laser.active = false;
+  try {
+    cat.laserFrustration = 80;
+    cat.update(1920, 1080, mockScene);
+    assert.ok(cat.laserFrustration < 80, '挫败感未衰减，红点将永久失效');
+  } finally {
+    mockScene.laser.active = laserWasActive;
+  }
+});
+
+test('最小场景上下文不会让猫的行动分支抛异常', () => {
+  const cat = new Cat(100, 100, { breed: BREEDS[0] });
+  assert.doesNotThrow(() => cat.update(1920, 1080, undefined));
+});
+
+// ---------------------------------------------------------------------------
+// 6. 运行时 + 性能/统计型测试（environment / ui / app 在 VM 中真实执行）
+// ---------------------------------------------------------------------------
+const { registerRuntimeTests } = require('./runtime');
+registerRuntimeTests({ basePath, fs, vm, assert, test });
+
+// ---------------------------------------------------------------------------
+// 7. 汇总
+// ---------------------------------------------------------------------------
+console.log(`\n📊 测试结果：${passed} 通过 / ${failed} 失败`);
+if (failed > 0) {
+  console.error('❌ 存在失败的断言，测试未通过。');
   process.exit(1);
 }
-testCat.isGrabbed = false;
-
-// 2. 测试多猫社交碰鼻礼与近身感应
-const catB = new Cat(testCat.x + 20, testCat.y);
-mockScene.cats = [testCat, catB];
-const interacted = testCat.checkSocialInteraction(mockScene);
-console.log(`✅ [多猫社交感应测试通过] 社交触发结果: ${interacted}`);
-
-// 3. 测试扫地机刚体推撞道具
-const roomba = new Roomba(400, 500);
-const yarn = new YarnBall(410, 500);
-mockScene.toys = [yarn];
-roomba.update(1920, 1080, mockScene);
-if (Math.abs(yarn.vx) > 0) {
-  console.log(`✅ [扫地机物理推撞测试通过] 毛线球被撞飞初速度: ${yarn.vx.toFixed(2)}`);
-} else {
-  console.log('ℹ️ [扫地机碰撞已执行]');
-}
-
-// 4. 测试纸箱装甲车
-const box = new CardboardBox(300, 500);
-box.triggerArmoredTank(1);
-box.update(1920, 1080);
-if (box.isArmoredTank && box.vx > 0) {
-  console.log(`✅ [猫猫纸箱装甲车测试通过] 冲刺速度: ${box.vx.toFixed(2)}`);
-}
-
-// 5. 测试高台推物判定
-testCat.perchedTier = { x: 500, y: 400, w: 120 };
-testCat.x = 500;
-testCat.y = 400;
-mockScene.toys = [new YarnBall(520, 400)];
-const swatResult = testCat.checkHighPerchSwat(mockScene);
-console.log(`✅ [高台贱爪推物测试通过] 推物判定触发: ${swatResult}`);
-
-// 6. 测试智能自动投喂机 (SmartFeeder) 出粮
-const feeder = new (mockWindow.CyberMeow.SmartFeeder)(600, 500);
-const prevToyCount = mockScene.toys.length;
-feeder.dispense(mockScene);
-if (mockScene.toys.length > prevToyCount) {
-  console.log(`✅ [智能自动投喂机测试通过] 成功出粮，生成香脆小鱼干！`);
-}
-
-// 7. 测试猫生战术策略大计 (Tactical Agenda System)
-const { AGENDAS, WaterPuddle } = mockWindow.CyberMeow;
-if (AGENDAS && AGENDAS.THRONEC_QUEST && AGENDAS.FEEDER_CAMP && AGENDAS.STEALTH_HUNT) {
-  console.log(`✅ [猫生战术大计定义测试通过] 已注册大计数量: ${Object.keys(AGENDAS).length}`);
-} else {
-  console.error('❌ [猫生战术大计定义测试失败]');
-  process.exit(1);
-}
-
-// 8. 测试猫咪猫爪物理拍打投喂机 (Feeder Tap Hack)
-const tapResult = feeder.receiveTap(testCat, mockScene);
-if (feeder.shakeTimer > 0) {
-  console.log(`✅ [猫咪拍打黑客投喂机测试通过] 震颤反馈触发成功，出粮结果: ${tapResult}`);
-} else {
-  console.error('❌ [猫咪拍打黑客投喂机测试失败]');
-  process.exit(1);
-}
-
-// 9. 测试水洼踩入狂暴甩水 (Wet Shake)
-const puddle = new WaterPuddle(500, 500);
-mockScene.toys = [puddle];
-testCat.x = 500;
-testCat.y = 500 - testCat.radius;
-testCat.state = 'idle';
-testCat.update(1920, 1080, mockScene);
-if (testCat.state === 'wet_shake' && testCat.intentIcon === '💦') {
-  console.log(`✅ [水洼踩入嫌弃甩爪测试通过] 状态触发: ${testCat.state}, 意图标识: ${testCat.intentIcon}`);
-} else {
-  console.log(`ℹ️ [水洼状态更新完成: ${testCat.state}]`);
-}
-
-// 10. 测试心机碰瓷肚皮陷阱爱情暴击 (Belly Trap & Love Bite)
-testCat.state = 'belly_trap';
-testCat.bellyTrapPatience = 10;
-testCat.pet(mockScene);
-if (testCat.state === 'idle' && Math.abs(testCat.vx) > 3) {
-  console.log(`✅ [心机碰瓷肚皮反咬测试通过] 爱情咬咬暴击并飞速弹射，逃逸初速度: ${testCat.vx.toFixed(2)}`);
-} else {
-  console.log('ℹ️ [肚皮碰瓷抚摸已响应]');
-}
-
-// 11. 测试王座争夺对决裁定 (Throne Challenge Duel)
-testCat.rival = catB;
-testCat.resolveThroneChallenge(mockScene);
-if (catB.vy < 0 && Math.abs(catB.vx) > 0) {
-  console.log(`✅ [王座争霸对决裁定测试通过] 败者被击退跳落高台，弹飞速度: vy=${catB.vy}, vx=${catB.vx}`);
-}
-
-// 12. 测试猫爬架阶梯攀爬与吊球拍打 (CatTree Climbing & Bat Dangle Ball)
-const catTree = new (mockWindow.CyberMeow.CatTree)(800, 500);
-mockScene.furniture = [catTree];
-catTree.batDangleBall(1);
-if (Math.abs(catTree.dangleBall.vx) > 0) {
-  console.log(`✅ [猫爬架吊球物理拍打测试通过] 吊球摆动初速度: ${catTree.dangleBall.vx.toFixed(2)}`);
-}
-testCat.currentAgenda = AGENDAS.TREE_CLIMB;
-testCat.agendaTarget = catTree;
-testCat.agendaPhase = 0;
-testCat.x = 800; testCat.y = 500;
-testCat.runAgenda(1920, 1080, mockScene);
-if (testCat.agendaPhase >= 1) {
-  console.log(`✅ [猫爬架阶梯攀爬大计推进测试通过] 当前推进阶段: ${testCat.agendaPhase}, 状态: ${testCat.state}`);
-}
-
-// 13. 测试纵向起跳极限速度解禁 (Unclamped High Leap Physics)
-testCat.state = 'jumping';
-testCat.vy = -12.5;
-testCat.update(1920, 1080, mockScene);
-if (testCat.vy <= -10.0) {
-  console.log(`✅ [纵向起跳速度解禁测试通过] 飞跃速度正常保留: vy=${testCat.vy.toFixed(2)} (突破 4.5px 限制)`);
-}
-
-// 14. 测试猫爬架跳台精准停靠判定 (CatTree Tier Perching)
-testCat.x = catTree.x + catTree.tiers[0].xOffset;
-testCat.y = catTree.y + catTree.tiers[0].yOffset - testCat.radius - 2;
-testCat.vy = 1.5;
-testCat.update(1920, 1080, mockScene);
-if (testCat.perchedTier === catTree.tiers[0]) {
-  console.log(`✅ [猫爬架平台精准停靠测试通过] 成功停靠在: ${catTree.tiers[0].name}`);
-}
-
-// 15. 测试空中猫道悬索桥动态下沉与物理平面 (CatSuspensionBridge)
-const bridge = new (mockWindow.CyberMeow.CatSuspensionBridge)(1500, 300, 280);
-const bridgeSurfaces = bridge.getPerchSurfaces();
-bridge.update(1920, 1080, mockScene);
-if (bridgeSurfaces.length > 0 && bridgeSurfaces[0].type === 'bridge') {
-  console.log(`✅ [空中猫道悬索桥测试通过] 桥跨度: ${bridge.w}px, 木板数量: ${bridge.plankCount}`);
-}
-
-// 16. 测试空中全景吊床摆动与立足判定 (AerialHammock)
-const hammock = new (mockWindow.CyberMeow.AerialHammock)(1500, 200, 115);
-hammock.nudge(0.12);
-hammock.update(1920, 1080, mockScene);
-const hammockSurfaces = hammock.getPerchSurfaces();
-if (hammockSurfaces.length > 0 && Math.abs(hammock.swaySpeed) > 0) {
-  console.log(`✅ [空中全景吊床测试通过] 摆动初速度: ${hammock.swaySpeed.toFixed(3)}, 停靠面: ${hammockSurfaces[0].type}`);
-}
-
-// 17. 测试阶梯式猫步道多级踏板 (WallClimbLadder)
-const ladder = new (mockWindow.CyberMeow.WallClimbLadder)(1000, 500, 3);
-const ladderSurfaces = ladder.getPerchSurfaces();
-if (ladderSurfaces.length === 3) {
-  console.log(`✅ [阶梯式猫步道测试通过] 踏板分级数量: ${ladderSurfaces.length} 级阶梯`);
-}
-
-// 18. 测试天花板悬吊风铃羽毛球谐振阻尼 (CeilingDanglingToy)
-const ceilingToy = new (mockWindow.CyberMeow.CeilingDanglingToy)(1500, 180);
-ceilingToy.batToy(5, -6);
-ceilingToy.update(1920, 1080);
-if (Math.abs(ceilingToy.vy) > 0 || Math.abs(ceilingToy.vx) > 0) {
-  console.log(`✅ [天花板风铃羽毛球谐振测试通过] 弹性回弹初速度: vy=${ceilingToy.vy.toFixed(2)}, vx=${ceilingToy.vx.toFixed(2)}`);
-}
-
-// 19. 测试飞天巡视战术大计 (AERIAL_PATROL Agenda)
-testCat.currentAgenda = AGENDAS.AERIAL_PATROL;
-testCat.agendaTarget = bridge;
-testCat.agendaPhase = 0;
-testCat.x = bridge.x - bridge.w / 2;
-testCat.y = 500;
-testCat.runAgenda(1920, 1080, mockScene);
-if (testCat.agendaPhase >= 1) {
-  console.log(`✅ [飞天巡视空中网络大计推进测试通过] 当前推进阶段: ${testCat.agendaPhase}, 状态: ${testCat.state}`);
-}
-
-console.log('\n🎉 所有核心模块、猫生战术脑与混沌深度交叉逻辑测试均成功通过！');
+console.log('🎉 所有核心模块、猫生战术脑与回归用例均通过真实断言验证！');

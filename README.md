@@ -126,8 +126,8 @@ cyber-meow-sandbox/
 ## 🚀 启动与体验方式
 
 ### 方式 A：直接运行（推荐，秒开）
-- 双击运行根目录下的 [start.bat](file:///f:/PlayGround/cyber-meow-sandbox/start.bat)。
-- 或者直接用 Chrome / Edge / Firefox 双击打开 [index.html](file:///f:/PlayGround/cyber-meow-sandbox/index.html)。
+- 双击运行根目录下的 [start.bat](start.bat)。
+- 或者直接用 Chrome / Edge / Firefox 双击打开 [index.html](index.html)。
 
 ### 方式 B：启动本地 Python HTTP 服务
 ```powershell
@@ -139,3 +139,14 @@ python cyber-meow-sandbox/server.py
 ```powershell
 node cyber-meow-sandbox/tests/verify.js
 ```
+当前共 62 项真实断言，失败时以退出码 1 结束。
+
+### 快捷键
+`1`–`0` 切换工具，`A/D` 或方向键平移镜头，`空格` 反重力，`M` 全体猫叫，`P` 拍照，**`C` 喵视角**（镜头跟随一只猫，把自己当成猫）。
+
+---
+
+## 📚 工程文档与实验
+
+- [docs/ENGINEERING.md](docs/ENGINEERING.md)：模块划分、数据流、设计约束、性能优化与健壮性修复清单、测试体系、已知限制。
+- [experiments/README.md](experiments/README.md)：ECS/SoA 可行性的独立基准实验与结论（不参与主程序运行，可用 `node --expose-gc experiments/bench.js` 复现）。
