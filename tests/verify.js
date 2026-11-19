@@ -219,4 +219,19 @@ if (catB.vy < 0 && Math.abs(catB.vx) > 0) {
   console.log(`✅ [王座争霸对决裁定测试通过] 败者被击退跳落高台，弹飞速度: vy=${catB.vy}, vx=${catB.vx}`);
 }
 
+// 12. 测试猫爬架阶梯攀爬与吊球拍打 (CatTree Climbing & Bat Dangle Ball)
+const catTree = new (mockWindow.CyberMeow.CatTree)(800, 500);
+catTree.batDangleBall(1);
+if (Math.abs(catTree.dangleBall.vx) > 0) {
+  console.log(`✅ [猫爬架吊球物理拍打测试通过] 吊球摆动初速度: ${catTree.dangleBall.vx.toFixed(2)}`);
+}
+testCat.currentAgenda = AGENDAS.TREE_CLIMB;
+testCat.agendaTarget = catTree;
+testCat.agendaPhase = 0;
+testCat.x = 800; testCat.y = 500;
+testCat.runAgenda(1920, 1080, mockScene);
+if (testCat.agendaPhase >= 1) {
+  console.log(`✅ [猫爬架阶梯攀爬大计推进测试通过] 当前推进阶段: ${testCat.agendaPhase}, 状态: ${testCat.state}`);
+}
+
 console.log('\n🎉 所有核心模块、猫生战术脑与混沌深度交叉逻辑测试均成功通过！');

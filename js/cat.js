@@ -85,10 +85,11 @@
 
   const HATS = ['none', 'bell', 'bow', 'wizard', 'party'];
 
-  // 8 大真实猫生战术大计 (Feline Strategic Agendas)
+  // 9 大真实猫生战术大计 (Feline Strategic Agendas)
   const AGENDAS = {
     NONE: 'NONE',                       // 自由日常
     THRONEC_QUEST: 'THRONEC_QUEST',     // 登高霸权：夺取豪宅最高王座与蔑视俯瞰
+    TREE_CLIMB: 'TREE_CLIMB',           // 阶梯攀爬：猫爬架抱柱磨爪、阶梯飞跃与狂拍吊球
     STEALTH_HUNT: 'STEALTH_HUNT',       // 隐秘刺客：一二三木头人战术潜行突袭
     FEEDER_CAMP: 'FEEDER_CAMP',         // 守仓黑客：蹲守自动投喂机与猫爪拍机敲碗
     MISCHIEF_DEMO: 'MISCHIEF_DEMO',     // 搞事拆迁：跳台边缘试探轻推与暴击推物打碎
@@ -660,6 +661,21 @@
         }
       }
 
+      // 3.5 豪华猫爬架阶梯攀爬与玩球 (TREE_CLIMB) - 跑酷猫、好奇猫极高优先，全猫喜爱
+      if (furniture && !this.perchedTier && Math.random() < 0.6) {
+        const catTree = furniture.find(f => f.type === 'cattree');
+        if (catTree) {
+          this.currentAgenda = AGENDAS.TREE_CLIMB;
+          this.agendaTarget = catTree;
+          this.agendaPhase = 0;
+          this.agendaTimer = 480;
+          this.intentIcon = '🌳';
+          this.intentLabel = '征服猫爬架';
+          this.speak('锁定豪华猫爬架！准备征服！🌳✨');
+          return true;
+        }
+      }
+
       // 4. 争夺最高王座 (THRONEC_QUEST) - 登顶俯瞰众生
       if (furniture && !this.perchedTier && Math.random() < (pId === 'ZOOMER' ? 0.6 : 0.35)) {
         const perches = furniture.filter(f => f.type === 'perch');
@@ -821,6 +837,84 @@
             }
             this.currentAgenda = AGENDAS.NONE;
             this.intentIcon = null;
+          }
+        }
+      } else if (this.currentAgenda === AGENDAS.TREE_CLIMB) {
+        const tree = this.agendaTarget;
+        if (!tree) { this.currentAgenda = AGENDAS.NONE; this.intentIcon = null; return; }
+        const dx = tree.x - this.x;
+
+        if (this.agendaPhase === 0) {
+          // 阶段0：跑向猫爬架立柱下方
+          this.state = 'walking';
+          this.facing = dx >= 0 ? 1 : -1;
+          this.vx = this.facing * 1.6;
+          if (Math.abs(dx) < 35) {
+            this.agendaPhase = 1;
+            this.state = 'scratching';
+            this.vx = 0;
+            this.stateTimer = 50;
+            soundEngine.playScratch();
+            this.speak('抱住立柱痛快磨个爪！🪵✨');
+            if (sceneContext.spawnParticle) sceneContext.spawnParticle(this.x, this.y - 20, '🪵✨');
+          }
+        } else if (this.agendaPhase === 1) {
+          // 阶段1：磨爪完成，蓄力跃上下层第1层跳台 (Tier 0)
+          this.state = 'scratching';
+          this.vx = 0;
+          if (this.stateTimer <= 0) {
+            this.agendaPhase = 2;
+            const t0 = tree.getTierWorldPos(0);
+            this.vy = -Math.sqrt(2 * 0.28 * Math.max(50, this.y - t0.y + 25));
+            this.vx = (t0.x - this.x) * 0.04;
+            this.state = 'idle';
+            this.stateTimer = 60;
+            soundEngine.playMeow(this.pitchMod * 1.1, 'chirp');
+          }
+        } else if (this.agendaPhase === 2) {
+          // 阶段2：等待落在第1层跳台上并拍打红色吊球
+          if (this.perchedTier === tree.tiers[0]) {
+            this.agendaPhase = 3;
+            this.state = 'swatting';
+            this.vx = 0;
+            this.stateTimer = 65;
+            this.facing = 1;
+            tree.batDangleBall(1);
+            this.speak('发现摇晃红球！看我连环拍！🐾💥');
+            if (sceneContext.spawnParticle) sceneContext.spawnParticle(tree.dangleBall.x, tree.dangleBall.y, '🐾🎈');
+          }
+        } else if (this.agendaPhase === 3) {
+          // 阶段3：拍打吊球，随后跃上顶层高台王座 (Tier 1)
+          this.state = 'swatting';
+          this.vx = 0;
+          if (this.stateTimer % 20 === 0) {
+            tree.batDangleBall(Math.random() < 0.5 ? 1 : -1);
+          }
+          if (this.stateTimer <= 0) {
+            this.agendaPhase = 4;
+            const t1 = tree.getTierWorldPos(1);
+            this.vy = -Math.sqrt(2 * 0.28 * Math.max(50, this.y - t1.y + 25));
+            this.vx = (t1.x - this.x) * 0.04;
+            this.state = 'idle';
+            this.stateTimer = 60;
+            soundEngine.playMeow(this.pitchMod * 1.2, 'chirp');
+          }
+        } else if (this.agendaPhase === 4) {
+          // 阶段4：登顶成功！
+          if (this.perchedTier === tree.tiers[1]) {
+            this.agendaPhase = 5;
+            this.state = 'judging_overlook';
+            this.stateTimer = 220;
+            this.speak('成功登顶豪华猫爬架！俯瞰整座江山~ 👑🌳');
+          }
+        } else if (this.agendaPhase === 5) {
+          this.state = 'judging_overlook';
+          this.vx = 0;
+          if (this.stateTimer <= 0) {
+            this.currentAgenda = AGENDAS.NONE;
+            this.intentIcon = null;
+            this.state = 'loaf';
+            this.stateTimer = 160;
           }
         }
       } else if (this.currentAgenda === AGENDAS.THRONEC_QUEST) {
@@ -1091,6 +1185,14 @@
         }
       }
 
+      // 8. 豪华猫爬架 (支持自主攀爬与击打吊球)
+      for (let f of furniture) {
+        if (f.type === 'cattree' && !this.perchedTier) {
+          const d = Math.hypot(f.x - this.x, f.y - this.y);
+          if (d < 450 && Math.random() < 0.45) return { type: 'cattree', obj: f, x: f.x, y: f.y };
+        }
+      }
+
       return null;
     }
 
@@ -1226,6 +1328,19 @@
           if (Math.random() < 0.08) sceneContext.spawnParticle(this.x, this.y - 20, '✨');
         } else {
           this.vx += (dx / dist) * 0.35;
+        }
+      } else if (target.type === 'cattree') {
+        if (Math.abs(dx) > 35) {
+          this.state = 'walking';
+          this.vx += (dx / Math.abs(dx)) * 0.45;
+        } else {
+          // 靠近立柱直接启动征服爬架大计！
+          this.currentAgenda = AGENDAS.TREE_CLIMB;
+          this.agendaTarget = target.obj;
+          this.agendaPhase = 1;
+          this.agendaTimer = 450;
+          this.intentIcon = '🌳';
+          this.intentLabel = '征服猫爬架';
         }
       }
     }

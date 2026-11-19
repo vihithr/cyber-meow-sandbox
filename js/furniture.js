@@ -303,16 +303,31 @@
       this.y = y;
       this.width = 130;
       this.tiers = [
-        { yOffset: -110, xOffset: -22, w: 90, h: 14, occupant: null },
-        { yOffset: -210, xOffset: 22, w: 85, h: 14, occupant: null }
+        { index: 0, tree: this, yOffset: -110, xOffset: -22, w: 90, h: 14, occupant: null, name: '下层跳台' },
+        { index: 1, tree: this, yOffset: -210, xOffset: 22, w: 85, h: 14, occupant: null, name: '顶层王座' }
       ];
       this.dangleBall = {
         x: x + 40,
         y: y - 160,
         vy: 0,
         vx: 0,
-        color: '#ff4757'
+        color: '#ff4757',
+        radius: 9
       };
+    }
+
+    // 拍打摇晃吊球 (Bat Dangle Ball)
+    batDangleBall(impulseDir = 1) {
+      this.dangleBall.vx = impulseDir * (6.5 + Math.random() * 3);
+      this.dangleBall.vy = -3.2;
+      if (window.CyberMeow.soundEngine) {
+        window.CyberMeow.soundEngine.playPop();
+      }
+    }
+
+    getTierWorldPos(idx) {
+      const t = this.tiers[idx];
+      return { x: this.x + t.xOffset, y: this.y + t.yOffset, w: t.w, h: t.h };
     }
 
     update(width, height) {
@@ -325,15 +340,23 @@
         }
       });
 
-      // 吊绳小球晃动
-      this.dangleBall.vx *= 0.95;
-      this.dangleBall.vy += 0.15;
+      // 吊绳小球真实 2D 摆动物理
+      this.dangleBall.vx *= 0.96;
+      this.dangleBall.vy += 0.22;
+      this.dangleBall.x += this.dangleBall.vx;
       this.dangleBall.y += this.dangleBall.vy;
+
+      const anchorX = this.x + 40;
       const anchorY = this.y - 200;
+      const dx = this.dangleBall.x - anchorX;
+      const dy = this.dangleBall.y - anchorY;
+      const dist = Math.hypot(dx, dy);
       const ropeLen = 45;
-      if (this.dangleBall.y > anchorY + ropeLen) {
-        this.dangleBall.y = anchorY + ropeLen;
-        this.dangleBall.vy = -this.dangleBall.vy * 0.5;
+      if (dist > ropeLen) {
+        this.dangleBall.x = anchorX + (dx / dist) * ropeLen;
+        this.dangleBall.y = anchorY + (dy / dist) * ropeLen;
+        this.dangleBall.vx -= (dx / dist) * 0.45;
+        this.dangleBall.vy -= (dy / dist) * 0.45;
       }
     }
 
