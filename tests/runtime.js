@@ -543,6 +543,40 @@ function registerRuntimeTests(options) {
     }
   });
 
+  test('自适应画质：连续慢帧降级，持续流畅后回升', () => {
+    const savedQuality = app.renderQuality;
+    const savedCap = app._dprCap;
+    const savedEma = app._frameEma;
+    const savedSlow = app._slowFrames;
+    const savedFast = app._fastFrames;
+    try {
+      app.renderQuality = 'high';
+      app._dprCap = 2;
+      app._slowFrames = 0;
+      app._fastFrames = 0;
+      app._frameEma = 35;
+      for (let i = 0; i < 21; i++) app._updateRenderQuality();
+      assert.strictEqual(app.renderQuality, 'low', '慢帧未触发降级');
+      assert.strictEqual(app._dprCap, 1, '降级后 DPR 上限未降低');
+      assert.strictEqual(sandbox.CyberMeow.renderQuality, 'low', '全局画质标记未同步');
+
+      app._frameEma = 12;
+      app._slowFrames = 0;
+      app._fastFrames = 0;
+      for (let i = 0; i < 181; i++) app._updateRenderQuality();
+      assert.strictEqual(app.renderQuality, 'high', '流畅后未恢复画质');
+      assert.strictEqual(app._dprCap, 2, '恢复后 DPR 上限未回升');
+    } finally {
+      app.renderQuality = savedQuality;
+      app._dprCap = savedCap;
+      app._frameEma = savedEma;
+      app._slowFrames = savedSlow;
+      app._fastFrames = savedFast;
+      sandbox.CyberMeow.renderQuality = savedQuality;
+      if (app.dpr !== Math.min(3, savedCap)) app.resize();
+    }
+  });
+
   test('喵视角：按 C 切换后镜头跟随目标猫', () => {
     const savedCatCam = app.catCam;
     const savedTarget = app.targetCameraX;
@@ -573,6 +607,110 @@ function registerRuntimeTests(options) {
       app.cats[0].x = savedCatX;
       app.mouse.x = savedMouseX;
       app.mouse.y = savedMouseY;
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // 手动画质切换（Q 键）与低画质渲染的实际开销差异
+  // -------------------------------------------------------------------------
+  console.log('\n🐾 正在测试手动画质切换与低画质渲染开销...');
+
+  test('手动 Q 键按 高→均衡→流畅→高 循环切换画质并同步 DPR 上限', () => {
+    const saved = {
+      quality: app.renderQuality, cap: app._dprCap,
+      ema: app._frameEma, slow: app._slowFrames, fast: app._fastFrames
+    };
+    const pressQ = () => mock.fire('keydown', {
+      target: { tagName: 'CANVAS' }, key: 'q', code: 'KeyQ', preventDefault: noop
+    });
+    try {
+      app.renderQuality = 'high';
+      app._dprCap = 2;
+      app._slowFrames = 0;
+      app._fastFrames = 0;
+
+      pressQ();
+      assert.strictEqual(app.renderQuality, 'medium', '高→均衡切换失败');
+      assert.strictEqual(app._dprCap, 1.25, '均衡档 DPR 上限错误');
+      assert.strictEqual(sandbox.CyberMeow.renderQuality, 'medium', '全局画质标记未同步');
+      assert.strictEqual(app._frameEma, 20, '均衡档帧间隔基线错误');
+
+      pressQ();
+      assert.strictEqual(app.renderQuality, 'low', '均衡→流畅切换失败');
+      assert.strictEqual(app._dprCap, 1, '流畅档 DPR 上限错误');
+      assert.strictEqual(app._frameEma, 35, '流畅档帧间隔基线错误');
+
+      pressQ();
+      assert.strictEqual(app.renderQuality, 'high', '流畅→高循环失败');
+      assert.strictEqual(app._dprCap, 2, '高档 DPR 上限未恢复');
+      assert.strictEqual(app._frameEma, 14, '高档帧间隔基线错误');
+    } finally {
+      app.renderQuality = saved.quality;
+      app._dprCap = saved.cap;
+      app._frameEma = saved.ema;
+      app._slowFrames = saved.slow;
+      app._fastFrames = saved.fast;
+      sandbox.CyberMeow.renderQuality = saved.quality;
+      app.resize();
+    }
+  });
+
+  test('自适应画质：中等慢帧进入均衡档（EMA 22~30）', () => {
+    const saved = {
+      quality: app.renderQuality, cap: app._dprCap,
+      ema: app._frameEma, slow: app._slowFrames, fast: app._fastFrames
+    };
+    try {
+      app.renderQuality = 'high';
+      app._dprCap = 2;
+      app._slowFrames = 0;
+      app._fastFrames = 0;
+      app._frameEma = 25;
+      for (let i = 0; i < 21; i++) app._updateRenderQuality();
+      assert.strictEqual(app.renderQuality, 'medium', '中等慢帧未进入均衡档');
+      assert.strictEqual(app._dprCap, 1.25, '均衡档 DPR 上限错误');
+      assert.strictEqual(sandbox.CyberMeow.renderQuality, 'medium', '全局标记未同步');
+    } finally {
+      app.renderQuality = saved.quality;
+      app._dprCap = saved.cap;
+      app._frameEma = saved.ema;
+      app._slowFrames = saved.slow;
+      app._fastFrames = saved.fast;
+      sandbox.CyberMeow.renderQuality = saved.quality;
+      app.resize();
+    }
+  });
+
+  test('低画质渲染确实减少渐变创建（宝石眼/毛发细节降级）', () => {
+    const savedQuality = sandbox.CyberMeow.renderQuality;
+    const cat = new sandbox.CyberMeow.Cat(500, 500, { breed: sandbox.CyberMeow.BREEDS[0] });
+    cat.state = 'idle';
+    cat.purrLevel = 0;
+    cat._blinkAmt = 0;
+    const ctx = mock.document.createElement('canvas').getContext('2d');
+    const countGradients = () =>
+      mock.counters.linearGradients + mock.counters.radialGradients + mock.counters.conicGradients;
+    // 每档先预热一帧建立一次性缓存，再累计 5 帧，消除单帧随机性
+    const measure = (quality) => {
+      sandbox.CyberMeow.renderQuality = quality;
+      assert.doesNotThrow(() => cat.draw(ctx, 1920, 1080));
+      let total = 0;
+      for (let i = 0; i < 5; i++) {
+        const before = countGradients();
+        assert.doesNotThrow(() => cat.draw(ctx, 1920, 1080));
+        total += countGradients() - before;
+      }
+      return total;
+    };
+    try {
+      const highTotal = measure('high');
+      const lowTotal = measure('low');
+      assert.ok(highTotal > 0, '高画质渲染未创建任何渐变，基准无意义');
+      assert.ok(lowTotal < highTotal,
+        `低画质未减少渐变创建: high=${highTotal}, low=${lowTotal}`);
+      console.log(`     5 帧单猫渐变创建总数: high=${highTotal}, low=${lowTotal}`);
+    } finally {
+      sandbox.CyberMeow.renderQuality = savedQuality;
     }
   });
 }

@@ -219,13 +219,29 @@
       }
     }
 
-    update(width, height) {
+    // 纸箱 occupant 双向引用维护：猫已不在场景、被抓起或不再把本箱当作 inBox 时清理；
+    // 有效时同步位置，避免箱子被扫地机推动或装甲车冲刺后猫咪滞留原地。
+    _syncOccupant(sceneContext) {
+      const cat = this.occupant;
+      if (!cat) return;
+      const gone = sceneContext && Array.isArray(sceneContext.cats) &&
+        sceneContext.cats.indexOf(cat) === -1;
+      if (cat.inBox !== this || cat.isGrabbed || gone) {
+        this.occupant = null;
+        return;
+      }
+      cat.x = this.x;
+      cat.y = this.y;
+    }
+
+    update(width, height, sceneContext) {
       if (this.heldBy) {
         // 如果被猫咪抱住疯狂蹬球，跟随猫咪胸前，不自行物理弹跳
         this.x = this.heldBy.x + this.heldBy.facing * 12;
         this.y = this.heldBy.y + 10;
         this.vx = 0;
         this.vy = 0;
+        this._syncOccupant(sceneContext);
         return;
       }
 
@@ -262,10 +278,8 @@
         this.vx = -this.vx * 0.8;
       }
 
-      // 验证在箱子里的猫咪是否依然有效
-      if (this.occupant && this.occupant.inBox !== this) {
-        this.occupant = null;
-      }
+      // 验证在箱子里的猫咪是否依然有效，并让有效乘客跟随箱体移动
+      this._syncOccupant(sceneContext);
     }
 
     draw(ctx) {

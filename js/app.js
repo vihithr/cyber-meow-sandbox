@@ -71,9 +71,10 @@
       this.particles = [];
       this.sunbeam = null;
 
-      // 离屏缓存层：按世界坐标烘焙（后备按 dpr 放大），相机平移/缩放时无需重建。
+      // 背景离屏层：视口切片缓存（只覆盖可见世界范围 + 余量），随主题/尺寸/DPR/相机越界失效。
       this._bgLayer = null;
       this._bgLayerKey = '';
+      // 静态家具层：保留旧接口供兼容与测试调用；主循环改为逐帧直接绘制，不再占用常驻显存。
       this._staticFurnitureLayer = null;
       this._staticFurnitureLayerKey = '';
       this._visibleRange = { left: -CULL_MARGIN, right: 0 };
@@ -88,6 +89,14 @@
       this.lastMousePos = { x: 0, y: 0 };
       this.lastClickedCat = null;
       this.lastClickTime = 0;
+
+      // 自适应画质：根据帧间隔 EMA 自动降/升渲染成本，保留新特性但让弱机也能跑
+      this.renderQuality = 'high';
+      this._dprCap = 2;
+      this._frameEma = 16.7;
+      this._slowFrames = 0;
+      this._fastFrames = 0;
+      window.CyberMeow.renderQuality = 'high';
     }
 
     init() {
@@ -116,8 +125,8 @@
     }
 
     resize() {
-      // 按设备像素比设置画布后备缓冲，避免高 DPI 屏幕上画面模糊；上限 2 以控制显存与填充率
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      // 按设备像素比设置画布后备缓冲；上限由自适应画质动态控制（2 / 1.25 / 1）
+      const dpr = Math.min(window.devicePixelRatio || 1, this._dprCap);
       this.dpr = dpr;
       this.viewportWidth = window.innerWidth;
       this.viewportHeight = window.innerHeight;
@@ -530,6 +539,19 @@
           uiManager.takeSnapshot(this.canvas);
         } else if (key === 'c') {
           this.toggleCatCam();
+        } else if (key === 'q') {
+          // 手动画质覆盖：高 → 均衡 → 流畅 → 高；自动调节仍会在之后接管
+          const order = ['high', 'medium', 'low'];
+          const next = order[(order.indexOf(this.renderQuality) + 1) % order.length];
+          this._frameEma = next === 'high' ? 14 : (next === 'medium' ? 20 : 35);
+          this._slowFrames = 0;
+          this._fastFrames = 0;
+          this.renderQuality = next;
+          window.CyberMeow.renderQuality = next;
+          const cap = next === 'high' ? 2 : (next === 'medium' ? 1.25 : 1);
+          if (cap !== this._dprCap) { this._dprCap = cap; this.resize(); }
+          const label = next === 'high' ? '高' : (next === 'medium' ? '均衡' : '流畅');
+          uiManager.showToast(`⚙️ 画质已切换为「${label}」（Q 键可继续切换）`);
         }
       });
     }
@@ -836,12 +858,13 @@
       return !!f && (f.type === 'perch' || f.type === 'ladder' || f.type === 'scratcher');
     }
 
-    _ensureLayerSlot(field) {
-      // 世界级离屏层固定按 1x 渲染：DPR=2 时两层约占 100MB 显存，1x 后约 26MB。
-      // 背景是渐变/木纹，家具是简单图形，放大后视觉损失很小；猫咪等动态主体仍在主画布按完整 DPR 绘制。
-      const layerDpr = 1;
-      const pw = Math.max(1, Math.round(this.worldWidth * layerDpr));
-      const ph = Math.max(1, Math.round(this.height * layerDpr));
+    // 视口切片后备：尺寸 = 当前可见世界宽度 + 两侧余量，远小于整座 3000px 世界。
+    // 世界 1x~1.25x 烘焙（上限 1.25 兼顾高 DPR 清晰度与显存），相机平移/缩放只在可见
+    // 区间超出已缓存切片时重绘；缩放本身由主 ctx 的 zoom 变换完成，不会拉伸缓存。
+    _ensureLayerSlot(field, cssWidth, cssHeight, layerScale) {
+      const scale = Math.max(1, Math.min(layerScale || 1, 1.25));
+      const pw = Math.max(1, Math.round(cssWidth * scale));
+      const ph = Math.max(1, Math.round(cssHeight * scale));
       let layer = this[field];
       if (!layer || layer.width !== pw || layer.height !== ph) {
         layer = document.createElement('canvas');
@@ -849,19 +872,39 @@
         layer.height = ph;
         this[field] = layer;
       }
-      layer._cacheDpr = layerDpr;
+      layer._cacheDpr = scale;
       const lctx = layer.getContext('2d');
-      lctx.setTransform(layerDpr, 0, 0, layerDpr, 0, 0);
-      lctx.clearRect(0, 0, this.worldWidth, this.height);
+      lctx.setTransform(scale, 0, 0, scale, 0, 0);
+      lctx.clearRect(0, 0, cssWidth, cssHeight);
       return { layer, lctx };
     }
 
-    // 背景签名：主题/世界尺寸/DPR 任一变化才重建；天气粒子是动态层，不进签名。
+    // 背景签名：主题/世界尺寸/DPR 任一变化才重建；可见区间超出已缓存切片也重建。
+    // 天气粒子是动态层，不进签名；相机微动未越界时直接命中缓存。
     _ensureBgLayer() {
       const key = `${environment.theme}|${Math.round(this.worldWidth)}|${Math.round(this.height)}|${this.dpr}`;
-      if (this._bgLayer && key === this._bgLayerKey) return;
-      const { lctx } = this._ensureLayerSlot('_bgLayer');
+      const r = this._visibleRange;
+      // 余量覆盖 CULL_MARGIN 与相机插值微动，避免平移时每帧重建
+      const pad = CULL_MARGIN + 240;
+      const wantLeft = Math.max(0, Math.floor(r.left - pad));
+      const wantRight = Math.min(this.worldWidth, Math.ceil(r.right + pad));
+      const cachedLeft = this._bgLayer ? (this._bgLayer._sliceLeft || 0) : 0;
+      const cachedW = this._bgLayer ? (this._bgLayer._sliceWorldWidth || 0) : 0;
+      if (this._bgLayer && key === this._bgLayerKey && wantRight > wantLeft &&
+          wantLeft >= cachedLeft && wantRight <= cachedLeft + cachedW) {
+        return;
+      }
+      const sliceWidth = Math.max(1, wantRight - wantLeft);
+      const layerScale = Math.min(this.dpr || 1, 1.25);
+      const { layer, lctx } = this._ensureLayerSlot('_bgLayer', sliceWidth, this.height, layerScale);
+      // 渐变对象按当前变换重建：切片原点变化后不能沿用旧渐变（否则渐变位置错位）。
+      if (environment.invalidateGradientCache) environment.invalidateGradientCache();
+      lctx.save();
+      lctx.translate(-wantLeft, 0); // 仍用世界坐标绘制，只取所需切片
       environment.drawStaticBackground(lctx, this.worldWidth, this.height);
+      lctx.restore();
+      layer._sliceLeft = wantLeft;
+      layer._sliceWorldWidth = sliceWidth;
       this._bgLayerKey = key;
     }
 
@@ -881,7 +924,9 @@
     _ensureStaticFurnitureLayer() {
       const key = this._staticFurnitureKey();
       if (this._staticFurnitureLayer && key === this._staticFurnitureLayerKey) return;
-      const { lctx } = this._ensureLayerSlot('_staticFurnitureLayer');
+      const { layer, lctx } = this._ensureLayerSlot('_staticFurnitureLayer', this.worldWidth, this.height, 1);
+      layer._sliceLeft = 0;
+      layer._sliceWorldWidth = this.worldWidth;
       for (const f of this.furniture) {
         if (!this._isBakedFurniture(f)) continue;
         // 烘焙前同步一次 update（如 Scratcher 的 y 依赖 floorY）；主循环还会再 update，
@@ -893,17 +938,49 @@
     }
 
     // 只把当前可见的世界切片 blit 到主画布，减少填充率。
-    // 源矩形按 dpr 换算到后备像素，目标用世界 CSS 像素；主 ctx 已有 dpr + zoom + 相机变换，
-    // zoom=1 时源像素与目标像素 1:1，不会模糊；相机平移只改变目标位置，不会错位。
+    // 源矩形按缓存比例换算到后备像素（并扣掉切片原点），目标用世界 CSS 单位；
+    // 主 ctx 已带 dpr + zoom + 相机变换，因此平移只改目标位置、缩放由 ctx 完成，不错位。
     _drawCachedLayer(ctx, layer) {
       if (!layer) return;
       const r = this._visibleRange;
       const x0 = Math.max(0, Math.floor(r.left));
       const x1 = Math.min(this.worldWidth, Math.ceil(r.right));
       if (x1 <= x0) return;
-      const sourceDpr = layer._cacheDpr || 1;
-      ctx.drawImage(layer, x0 * sourceDpr, 0, (x1 - x0) * sourceDpr, layer.height,
-        x0, 0, x1 - x0, this.height);
+      const sliceLeft = layer._sliceLeft || 0;
+      const sliceW = layer._sliceWorldWidth || this.worldWidth;
+      const sx0 = Math.max(x0, sliceLeft);
+      const sx1 = Math.min(x1, sliceLeft + sliceW);
+      if (sx1 <= sx0) return;
+      const scale = layer._cacheDpr || 1;
+      ctx.drawImage(layer,
+        (sx0 - sliceLeft) * scale, 0, (sx1 - sx0) * scale, layer.height,
+        sx0, 0, sx1 - sx0, this.height);
+    }
+
+    // 自适应画质：连续慢帧才降级，持续流畅才升级，避免在阈值附近来回抖动。
+    // 降级只降低 DPR 与跳过部分昂贵绘制细节，不改玩法与实体数量。
+    _updateRenderQuality() {
+      const ema = this._frameEma;
+      let next = this.renderQuality;
+      if (ema > 22) { this._slowFrames++; this._fastFrames = 0; }
+      else if (ema < 13) { this._fastFrames++; this._slowFrames = 0; }
+      else { this._slowFrames = 0; this._fastFrames = 0; }
+
+      if (this._slowFrames >= 20) next = ema > 30 ? 'low' : 'medium';
+      else if (this._fastFrames >= 180) next = 'high';
+      if (next === this.renderQuality) return;
+
+      this.renderQuality = next;
+      window.CyberMeow.renderQuality = next;
+      const cap = next === 'high' ? 2 : (next === 'medium' ? 1.25 : 1);
+      if (cap !== this._dprCap) {
+        this._dprCap = cap;
+        this.resize(); // 重设主画布后备缓冲与离屏层
+      }
+      this._slowFrames = 0;
+      this._fastFrames = 0;
+      const label = next === 'high' ? '高' : (next === 'medium' ? '均衡' : '流畅');
+      uiManager.showToast(`⚙️ 帧率自适应：已切换到「${label}」画质~`);
     }
 
     // --- 主帧渲染循环 ---
@@ -919,6 +996,11 @@
         : 1 / 60;
       this._lastFrameTime = nowMs;
       this.dt = dt;
+      // 帧间隔 EMA 与画质自适应（用真实帧间隔，不用被 clamp 后的 dt）
+      const rawFrameMs = nowMs - (this._prevFrameMs === undefined ? nowMs - 16.7 : this._prevFrameMs);
+      this._prevFrameMs = nowMs;
+      this._frameEma = this._frameEma * 0.88 + Math.min(rawFrameMs, 200) * 0.12;
+      this._updateRenderQuality();
 
       // 喵视角：在插值之前更新目标镜头，让跟随平滑且不被手动平移抢走
       if (this.catCam) {
@@ -948,7 +1030,8 @@
       this._refreshVisibleRange();
 
       // 2. 背景与天气系统 (覆盖整座 3000px 豪宅世界)
-      // 取舍：静态背景烘焙到离屏层，命中缓存时只 drawImage；天气粒子逐帧动态绘制。
+      // 取舍：静态背景烘焙到「视口切片」离屏层，命中缓存时只 drawImage 一次；
+      //      天气粒子与飞鸟是动态层，逐帧单独绘制，不会被缓存冻结。
       environment.update(worldWidth, height);
       this._ensureBgLayer();
       this._drawCachedLayer(ctx, this._bgLayer);
@@ -960,20 +1043,16 @@
         this.sunbeam.draw(ctx);
       }
 
-      // 4. 静态家具层：只烘焙无动画的跳台/爬梯/抓板，命中缓存后 drawImage
-      this._ensureStaticFurnitureLayer();
-      this._drawCachedLayer(ctx, this._staticFurnitureLayer);
-
-      // 5. 家具更新与绘制 (支持扫地机推物碰撞与智能自动出粮)
+      // 4. 家具更新与绘制 (支持扫地机推物碰撞与智能自动出粮)
       // 取舍：所有家具的 update 必须逐帧执行——投喂机出粮、Roomba 推物等有跨对象副作用；
-      //      仅对可见的、未烘焙的家具调用 draw，烘焙类型已在上面整层绘制，不重复画。
+      //      家具不再烘焙到整世界离屏层，而是按可见裁剪直接绘制：省掉第二张常驻离屏层与
+      //      每帧第二次 blit，且按主画布完整 DPR 绘制，平移/缩放不会错位或降低清晰度。
       for (let f of this.furniture) {
         f.update(worldWidth, height, this);
-        if (this._isBakedFurniture(f)) continue;
         if (this._isVisibleX(f.x, this._halfWidth(f))) f.draw(ctx);
       }
 
-      // 6. 玩具更新与绘制；过期水洼及时回收，避免数组只增不减
+      // 5. 玩具更新与绘制；过期水洼及时回收，避免数组只增不减
       // 取舍：回收 splice 与 update 全部保留，仅裁剪 draw。
       for (let i = this.toys.length - 1; i >= 0; i--) {
         const t = this.toys[i];
@@ -988,17 +1067,17 @@
       if (this.toys.length > MAX_TOYS) this.toys.splice(0, this.toys.length - MAX_TOYS);
       if (this.furniture.length > MAX_FURNITURE) this.furniture.splice(0, this.furniture.length - MAX_FURNITURE);
 
-      // 7. 猫咪更新与绘制 (分层渲染确保交互自然)
+      // 6. 猫咪更新与绘制 (分层渲染确保交互自然)
       // 取舍：猫的 update 负责吃鱼 splice / 骑行 / 附着状态，全部执行；被拖拽的猫强制绘制。
       for (let c of this.cats) {
         c.update(worldWidth, height, this);
         if (c === this.mouse.draggedCat || this._isVisibleX(c.x, (c.radius || 22) + 40)) c.draw(ctx);
       }
 
-      // 8. 逗猫棒
+      // 7. 逗猫棒
       featherWand.draw(ctx);
 
-      // 9. 激光红点
+      // 8. 激光红点
       if (this.laser.active) {
         ctx.save();
         ctx.beginPath();
@@ -1015,7 +1094,7 @@
         ctx.restore();
       }
 
-      // 10. 漂浮粒子与爱心：物理推进与回收对所有粒子执行，仅裁剪绘制
+      // 9. 漂浮粒子与爱心：物理推进与回收对所有粒子执行，仅裁剪绘制
       for (let i = this.particles.length - 1; i >= 0; i--) {
         const p = this.particles[i];
         p.x += p.vx;
@@ -1035,7 +1114,7 @@
         if (p.alpha <= 0) this.particles.splice(i, 1);
       }
 
-      // 11. 红点挑战模式目标点绘制 (在世界坐标系内)
+      // 10. 红点挑战模式目标点绘制 (在世界坐标系内)
       uiManager.updateChallenge(this.cats, this);
       uiManager.drawChallengeTarget(ctx);
 

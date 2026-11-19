@@ -30,6 +30,13 @@ const CANVAS_PROPERTIES = new Set([
   'imageSmoothingEnabled', 'imageSmoothingQuality', 'lineDashOffset'
 ]);
 
+// 路径/位图操作：供 tests/bench.js 统计每帧渲染开销（不参与断言，仅计数）。
+const PATH_OP_METHODS = new Set([
+  'beginPath', 'closePath', 'moveTo', 'lineTo', 'bezierCurveTo',
+  'quadraticCurveTo', 'arc', 'arcTo', 'ellipse', 'rect', 'roundRect',
+  'fill', 'stroke', 'clip'
+]);
+
 function create2DContext(canvas, counters) {
   const target = {
     canvas,
@@ -64,7 +71,14 @@ function create2DContext(canvas, counters) {
   };
 
   CANVAS_METHODS.forEach(name => {
-    if (!(name in target)) target[name] = noop;
+    if (name in target) return;
+    if (name === 'drawImage') {
+      target[name] = function () { counters.drawImages++; };
+    } else if (PATH_OP_METHODS.has(name)) {
+      target[name] = function () { counters.pathOps++; };
+    } else {
+      target[name] = noop;
+    }
   });
 
   return new Proxy(target, {
@@ -276,6 +290,8 @@ function createBrowserMock(options) {
     linearGradients: 0,
     radialGradients: 0,
     conicGradients: 0,
+    pathOps: 0,
+    drawImages: 0,
     toDataURL: 0,
     rafRequests: 0,
     timers: 0

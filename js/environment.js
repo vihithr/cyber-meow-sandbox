@@ -49,6 +49,12 @@
       this.theme = theme;
     }
 
+    // 背景离屏层改用视口切片后，切片原点会随相机变化；渐变对象必须按当前变换重建，
+    // 否则会沿用旧切片的坐标而错位。仅由缓存重建路径调用，不进入每帧热路径。
+    invalidateGradientCache() {
+      this._bgCache.key = '';
+    }
+
     toggleWeather() {
       const weathers = ['clear', 'rain', 'fireflies'];
       const nextIdx = (weathers.indexOf(this.weather) + 1) % weathers.length;
@@ -292,7 +298,10 @@
       ctx.save();
 
       // 飘浮微尘 / 萤火虫：阴影状态按天气设置一次，避免逐粒子切换昂贵状态
-      const isFirefly = this.weather === 'fireflies';
+      // 低画质下完全关闭发光阴影，这是移动端最贵的效果之一
+      const lowQuality = (typeof window !== 'undefined' && window.CyberMeow
+        && window.CyberMeow.renderQuality === 'low');
+      const isFirefly = !lowQuality && this.weather === 'fireflies';
       if (isFirefly) {
         ctx.shadowColor = '#f1c40f';
         ctx.shadowBlur = 8;

@@ -811,7 +811,9 @@
       const bufferSize = Math.floor(this.ctx.sampleRate * 0.12);
       const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
       const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
+      // 用 data.length 而非 bufferSize：静默上下文的 getChannelData() 返回空数组，
+      // 按实际长度遍历可避免越界写入与无意义计算；真实 AudioBuffer 下两者相等
+      for (let i = 0; i < data.length; i++) {
         data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.2));
       }
       const noise = this.ctx.createBufferSource();
@@ -919,7 +921,9 @@
     }
 
     startLofiBGM() {
-      if (this.lofiTimer) return;
+      // dispose 后 UI 仍可能触发 BGM 开启（app.js 直接调用本方法），
+      // 必须早退，否则 playChord 虽因 _disposed 静默，interval 仍会泄漏
+      if (this._disposed || this.lofiTimer) return;
       // 舒缓和弦走向 (Cmaj9, Am9, Fmaj7, G7sus4)
       const chords = [
         [261.63, 329.63, 392.00, 493.88, 587.33], // Cmaj9

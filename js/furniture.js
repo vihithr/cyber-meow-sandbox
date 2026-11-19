@@ -187,16 +187,41 @@
       this.type = 'roomba';
       this.x = x;
       this.y = y;
-      this.vx = 1.4;
+      this.baseVx = 1.4;
+      this.vx = this.baseVx;
       this.vy = 0;
       this.radius = 34;
       this.height = 18;
       this.rider = null;
       this.bumpCooldown = 0;
       this.ledPhase = 0;
+      // 空降跳杀踢击写入 spin，本类负责消费为机身旋转并在结束后归位
+      this.spin = 0;
+      this.spinAngle = 0;
     }
 
     update(width, height, sceneContext) {
+      // 空降跳杀踢击结算：把外部写入的 spin 消费为机身旋转并逐步衰减；
+      // 被踢出的超额速度同步回落到基础巡航速度，避免速度/旋转永久残留。
+      if (this.spin > 0) {
+        this.spinAngle += this.spin * 1.6;
+        this.spin *= 0.9;
+        if (this.spin < 0.02) this.spin = 0;
+        const dir = Math.sign(this.vx) || 1;
+        const excess = Math.abs(this.vx) - this.baseVx;
+        if (excess > 0.05) {
+          this.vx = dir * (this.baseVx + excess * 0.88);
+        } else if (excess > 0) {
+          this.vx = dir * this.baseVx;
+        }
+      } else if (this.spinAngle !== 0) {
+        // 旋转特效衰减完毕后走最短路径回正，避免机身永久歪斜
+        let a = this.spinAngle % (Math.PI * 2);
+        if (a > Math.PI) a -= Math.PI * 2;
+        if (a < -Math.PI) a += Math.PI * 2;
+        this.spinAngle = Math.abs(a) < 0.01 ? 0 : a * 0.85;
+      }
+
       const gravity = physicsWorld.getGravity();
       this.vy += gravity;
 
@@ -244,9 +269,11 @@
         }
       }
 
-      // 乘客猫咪
+      // 乘客猫咪：除双向引用与被抓起状态外，还要清理已从场景移除的猫，避免悬空引用
       if (this.rider) {
-        if (this.rider.ridingObj !== this || this.rider.isGrabbed) {
+        const riderGone = sceneContext && Array.isArray(sceneContext.cats) &&
+          sceneContext.cats.indexOf(this.rider) === -1;
+        if (this.rider.ridingObj !== this || this.rider.isGrabbed || riderGone) {
           this.rider = null;
         } else {
           this.rider.x = this.x;
@@ -277,6 +304,9 @@
       ctx.ellipse(0, 4, this.radius, 10, 0, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
       ctx.fill();
+
+      // 被踢后的机身旋转：阴影保持贴地，仅底盘与上层结构随 spinAngle 转动
+      if (this.spinAngle) ctx.rotate(this.spinAngle);
 
       // 底盘主体
       ctx.beginPath();
@@ -764,6 +794,8 @@
           }
         }
         this.sags[i] += (targetSag - this.sags[i]) * 0.2;
+        // 无猫时把渐近 0 的浮点尾数直接归零，避免桥面高度长期保留微小偏移
+        if (targetSag === 0 && this.sags[i] < 0.05) this.sags[i] = 0;
       }
 
       if (activeCatOnBridge) {
@@ -772,6 +804,12 @@
         this.dynamicSag += (centerSag - this.dynamicSag) * 0.25;
       } else {
         this.dynamicSag *= 0.85;
+        if (this.dynamicSag < 0.05) this.dynamicSag = 0;
+      }
+
+      // 桥对决结束后清理可能残留的 occupant 引用（猫可用 perchedTier 或 onBridge 指向桥）
+      if (this.occupant && this.occupant.perchedTier !== this && this.occupant.onBridge !== this) {
+        this.occupant = null;
       }
     }
 

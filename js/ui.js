@@ -341,8 +341,10 @@
           this.challengeScore += 100;
           soundEngine.playPop();
           soundEngine.playMeow(c.pitchMod * 1.3, 'chatter');
-          for (let i = 0; i < 8; i++) {
-            sceneContext.spawnParticle(this.targetStar.x, this.targetStar.y, '⭐');
+          if (sceneContext && sceneContext.spawnParticle) {
+            for (let i = 0; i < 8; i++) {
+              sceneContext.spawnParticle(this.targetStar.x, this.targetStar.y, '⭐');
+            }
           }
           this.spawnNextTarget(sceneContext);
           break;
@@ -386,10 +388,12 @@
       clearInterval(this.challengeTimer);
       this.challengeTimer = null;
       this.targetStar = null;
-      if (this.prevTool && window.CyberMeow.setTool) {
-        window.CyberMeow.setTool(this.prevTool);
-        this.prevTool = null;
+      // prevTool 缺失时也要退出激光笔，避免玩家被困在该工具模式
+      const restoreTool = this.prevTool || 'pet';
+      if (window.CyberMeow.setTool) {
+        window.CyberMeow.setTool(restoreTool);
       }
+      this.prevTool = null;
       const hud = document.getElementById('challenge-hud');
       if (hud) hud.style.display = 'none';
     }

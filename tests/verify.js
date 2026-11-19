@@ -481,6 +481,190 @@ test('最小场景上下文不会让猫的行动分支抛异常', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 5.5 外部新特性补充断言：空降跳杀结算 / 吊桥对决 / 观鸟齿颤 / 暴走
+// ---------------------------------------------------------------------------
+console.log('\n🐾 正在测试外部新特性的完整行为链...');
+
+test('空降跳杀分别锁定 roomba / 猫 / 纸箱三种目标', () => {
+  const makeHunter = () => {
+    const c = new Cat(500, 200, { breed: BREEDS[0] });
+    c.perchedTier = { x: 500, y: 200, w: 100 };
+    return c;
+  };
+
+  const hunterRoomba = makeHunter();
+  const roomba = { type: 'roomba', x: 530, y: 350, vx: 0, spin: 0 };
+  assert.strictEqual(hunterRoomba.checkAerialPounce({
+    cats: [], furniture: [roomba], toys: [], spawnParticle: noop
+  }), true, '未锁定扫地机');
+  assert.strictEqual(hunterRoomba.aerialTargetType, 'roomba');
+  assert.strictEqual(hunterRoomba.aerialTarget, roomba);
+
+  const hunterCat = makeHunter();
+  const victim = new Cat(520, 360, { breed: BREEDS[1] });
+  assert.strictEqual(hunterCat.checkAerialPounce({
+    cats: [hunterCat, victim], furniture: [], toys: [], spawnParticle: noop
+  }), true, '未锁定地面猫');
+  assert.strictEqual(hunterCat.aerialTargetType, 'cat');
+  assert.strictEqual(hunterCat.aerialTarget, victim);
+
+  const hunterBox = makeHunter();
+  const box = { type: 'box', x: 520, y: 360, occupant: null };
+  assert.strictEqual(hunterBox.checkAerialPounce({
+    cats: [], furniture: [box], toys: [], spawnParticle: noop
+  }), true, '未锁定空纸箱');
+  assert.strictEqual(hunterBox.aerialTargetType, 'box');
+  assert.strictEqual(hunterBox.aerialTarget, box);
+
+  [hunterRoomba, hunterCat, hunterBox].forEach(c => {
+    assert.strictEqual(c.state, 'aerial_pounce_aim', '未进入蓄力状态');
+    assert.strictEqual(c.stateTimer, 45, '蓄力时长异常');
+    assert.strictEqual(c.intentIcon, '🎯');
+  });
+});
+
+test('空降跳杀目标优先级：扫地机 > 猫 > 纸箱', () => {
+  const cat = new Cat(500, 200, { breed: BREEDS[0] });
+  cat.perchedTier = { x: 500, y: 200, w: 100 };
+  const roomba = { type: 'roomba', x: 530, y: 350 };
+  const other = new Cat(520, 360, { breed: BREEDS[1] });
+  const box = { type: 'box', x: 510, y: 360, occupant: null };
+  cat.checkAerialPounce({ cats: [cat, other], furniture: [box, roomba], toys: [] });
+  assert.strictEqual(cat.aerialTargetType, 'roomba', '优先级错误：应先锁定扫地机');
+});
+
+test('空降跳杀蓄力结束转入下坠并解除所有落脚状态', () => {
+  const cat = new Cat(500, 300, { breed: BREEDS[0] });
+  cat.state = 'aerial_pounce_aim';
+  cat.stateTimer = 0;
+  cat.perchedTier = { x: 500, y: 300, w: 100 };
+  cat.onBridge = true;
+  cat.inHammock = true;
+  cat.aerialTarget = { x: 530, y: 360 };
+  cat.aerialTargetType = 'roomba';
+  cat.update(1920, 1080, { cats: [], furniture: [], toys: [], spawnParticle: noop });
+  assert.strictEqual(cat.state, 'aerial_pounce_drop', '蓄力未转入下坠');
+  assert.strictEqual(cat.perchedTier, null, '未解除跳台落脚');
+  assert.strictEqual(cat.onBridge, false, '未解除吊桥状态');
+  assert.strictEqual(cat.inHammock, false, '未解除吊床状态');
+  assert.ok(cat.vy < -2.5, `下坠初速度异常: ${cat.vy}`);
+});
+
+test('空降跳杀落地对扫地机结算：击退与旋转', () => {
+  const cat = new Cat(530, 400, { breed: BREEDS[0] });
+  cat.state = 'aerial_pounce_drop';
+  cat.facing = 1;
+  cat.vx = 0;
+  cat.vy = 0;
+  cat.stateTimer = 0;
+  const roomba = { type: 'roomba', x: 530, y: 400, vx: 0, spin: 0 };
+  cat.aerialTarget = roomba;
+  cat.aerialTargetType = 'roomba';
+  const scene = { cats: [], furniture: [roomba], toys: [], spawnParticle: noop };
+  // 每帧把下坠猫钉在目标中心，规避同帧随机位移导致 dist 偶发超出判定半径
+  for (let i = 0; i < 6 && cat.aerialTarget; i++) {
+    cat.x = roomba.x;
+    cat.y = roomba.y;
+    cat.vx = 0;
+    cat.vy = 0;
+    cat.state = 'aerial_pounce_drop';
+    cat.update(1920, 1080, scene);
+  }
+  assert.notStrictEqual(cat.state, 'aerial_pounce_drop', '未退出下坠状态');
+  assert.strictEqual(cat.aerialTarget, null, '未清空目标引用');
+  assert.strictEqual(roomba.spin, 0.35, '扫地机未进入旋转');
+  assert.ok(Math.abs(roomba.vx) > 0, '扫地机未被击退');
+});
+
+test('空降跳杀落地对猫结算：双猫抱摔击落', () => {
+  const cat = new Cat(520, 400, { breed: BREEDS[0] });
+  cat.state = 'aerial_pounce_drop';
+  cat.facing = 1;
+  cat.vx = 0;
+  cat.vy = 0;
+  const victim = new Cat(520, 400, { breed: BREEDS[1] });
+  cat.aerialTarget = victim;
+  cat.aerialTargetType = 'cat';
+  const scene = { cats: [cat, victim], furniture: [], toys: [], spawnParticle: noop };
+  for (let i = 0; i < 6 && cat.aerialTarget; i++) {
+    cat.x = victim.x;
+    cat.y = victim.y;
+    cat.vx = 0;
+    cat.vy = 0;
+    cat.state = 'aerial_pounce_drop';
+    cat.update(1920, 1080, scene);
+  }
+  assert.notStrictEqual(cat.state, 'aerial_pounce_drop', '未退出下坠状态');
+  assert.strictEqual(cat.aerialTarget, null);
+  assert.strictEqual(victim.state, 'idle');
+  assert.strictEqual(victim.stateTimer, 55);
+  assert.ok(Math.abs(victim.vx) > 0 && victim.vy < 0, '目标猫未被击飞');
+});
+
+test('空降跳杀落地对纸箱结算：液体猫进箱', () => {
+  const cat = new Cat(520, 400, { breed: BREEDS[0] });
+  cat.state = 'aerial_pounce_drop';
+  cat.vx = 0;
+  cat.vy = 0;
+  const box = { type: 'box', x: 520, y: 400, occupant: null };
+  cat.aerialTarget = box;
+  cat.aerialTargetType = 'box';
+  const scene = { cats: [], furniture: [box], toys: [], spawnParticle: noop };
+  for (let i = 0; i < 6 && cat.aerialTarget; i++) {
+    cat.x = box.x;
+    cat.y = box.y;
+    cat.vx = 0;
+    cat.vy = 0;
+    cat.state = 'aerial_pounce_drop';
+    cat.update(1920, 1080, scene);
+  }
+  assert.strictEqual(cat.inBox, box, '未进入纸箱');
+  assert.strictEqual(box.occupant, cat);
+  assert.strictEqual(cat.aerialTarget, null);
+});
+
+test('吊桥对决进入后主循环持续推进对决状态', () => {
+  const bridge = new CyberMeow.CatSuspensionBridge(800, 300, 320);
+  const catA = new Cat(790, 300, { breed: BREEDS[0] });
+  const catB = new Cat(820, 300, { breed: BREEDS[1] });
+  catA.onBridge = bridge;
+  catB.onBridge = bridge;
+  const scene = { cats: [catA, catB], furniture: [bridge], toys: [], spawnParticle: noop };
+  assert.strictEqual(catA.checkBridgeDuel(scene), true);
+  assert.strictEqual(catA.bridgeRival, catB, '未记录对决对手');
+  assert.strictEqual(catA.stateTimer, 75);
+  const before = catA.stateTimer;
+  assert.doesNotThrow(() => catA.update(1920, 1080, scene));
+  assert.strictEqual(catA.state, 'bridge_duel', '对决状态被意外打断');
+  assert.ok(catA.stateTimer < before, '对决计时未推进');
+  assert.strictEqual(typeof catA.swatProgress, 'number');
+});
+
+test('观鸟齿颤写入意图标记并在逐帧更新中推进齿颤相位', () => {
+  const cat = new Cat(300, 400, { breed: BREEDS[0] });
+  const scene = { environment: { getBird: () => ({ active: true, x: 350, y: 120 }) } };
+  assert.strictEqual(cat.checkWindowBirdChatter(scene), true);
+  assert.strictEqual(cat.intentIcon, '🕊️');
+  assert.strictEqual(cat.lookTarget.x, 350);
+  assert.strictEqual(cat.lookTarget.y, 120);
+  const phaseBefore = cat.chatterPhase;
+  cat.update(1920, 1080, { cats: [], furniture: [], toys: [], spawnParticle: noop });
+  assert.ok(cat.chatterPhase > phaseBefore, '齿颤相位未推进');
+});
+
+test('凌晨暴走写满能量、弹射初速与狂飙意图', () => {
+  const cat = new Cat(500, 500, { breed: BREEDS[0] });
+  cat.energy = 10;
+  cat.triggerMidnightZoomies(mockScene);
+  assert.strictEqual(cat.state, 'zoomies');
+  assert.strictEqual(cat.energy, 100, '能量未拉满');
+  assert.strictEqual(cat.vy, -6.5);
+  assert.ok(Math.abs(cat.vx) >= 10.5, '弹射初速不足');
+  assert.strictEqual(cat.intentLabel, '凌晨三点全屋狂飙');
+  assert.ok(cat.stateTimer >= 240, '暴走时长不足');
+});
+
+// ---------------------------------------------------------------------------
 // 6. 运行时 + 性能/统计型测试（environment / ui / app 在 VM 中真实执行）
 // ---------------------------------------------------------------------------
 const { registerRuntimeTests } = require('./runtime');
