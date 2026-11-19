@@ -162,9 +162,9 @@
   const CAT_NOMINAL_DT = 1 / 60;
   const CAT_MAX_DT = 0.05;
   // 猫咪视觉体型分母：scaleFactor = radius / 该值。数值越大猫越小。
-  // 24 是旧值（视觉约为碰撞体 3 倍），34 使视觉体长约为碰撞直径的 2 倍。
+  // 24 是旧值（视觉约为碰撞体 3 倍），34 仍明显偏大；44 使视觉身长接近碰撞直径。
   // 想调整大小只改这里，不影响物理碰撞、交互判定与存档。
-  const CAT_VISUAL_SCALE_DENOM = 34;
+  const CAT_VISUAL_SCALE_DENOM = 44;
 
   // 自适应画质：由主循环写入全局，渲染时按档位跳过昂贵的微细节
   function currentRenderQuality() {
@@ -1200,7 +1200,7 @@
       const furPattern = lowQuality ? null : getFurPattern(ctx);
       // 渲染设计坐标系的基准身长约 96px，而物理半径仅 22~26px（直径 44~52px）。
       // 旧系数 /24 让视觉体型约为碰撞体的 3 倍，既显得过大也推高填充率；
-      // 改为 /34 后视觉体长约为碰撞直径的 2 倍，物理碰撞与交互判定保持不变。
+      // /44 后视觉身长与碰撞直径基本相当，物理碰撞与交互判定保持不变。
       const scaleFactor = this.radius / CAT_VISUAL_SCALE_DENOM;
       const breed = this.breed;
       const age = this.age;

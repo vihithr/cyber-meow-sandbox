@@ -63,15 +63,18 @@ CyberMeow 是一个零外部依赖的桌面猫咪物理沙盒，使用原生 HTM
 - **新特性交互修复**：Roomba 的 `spin` 字段从“只写不读”变为带衰减的真实旋转，被跳杀踢飞后的速度自动回落巡航值；`rider` 失效清理增加场景在场校验；桥面下沉尾数归零并清理失效 `occupant`；纸箱被推动时同步箱内猫坐标并校验占用关系。
 - **新特性状态机修复**：吊桥对决从死代码变为可触发（`onBridge` 在桥面落脚时同步）；对决结算改为单次判定、双方对称清理，杜绝败者状态残留与双判；空降进箱先释放原占用者；空降目标在场校验按类型区分集合（roomba 在 furniture，猫在 cats，纸箱在 furniture/toys）。
 - **音频外部改动加固**：补 `startLofiBGM` 的 `_disposed` 早退（避免 dispose 后定时器泄漏）；噪声缓冲循环改用 `data.length`（静默模式下不再空转写入）。
+- **指针边界坐标**：`getWorldPos` 改用 `??` 读取 `clientX/clientY`，`0` 不再被当作缺失值回退到不存在的 `touches`。此前点击画布顶边／左边会把 `NaN` 带入世界坐标，经毛线球持有链污染道具位置，使道具在 Canvas 上静默消失。该问题由 3000 帧压力仿真复现并加入回归断言。
+- **视觉体型**：`CAT_VISUAL_SCALE_DENOM` 从 24 经 34 调整到 44，使设计稿约 96px 的身长在缩放后接近 44～52px 的碰撞直径；物理半径、交互判定与存档不受影响。
 
 ## 6. 测试体系
 
-测试入口为 `node tests/verify.js`，共 **80 项断言**，失败以退出码 1 结束。文件构成：
+测试入口为 `node tests/verify.js`，共 **86 项断言**，失败以退出码 1 结束。文件构成：
 
 - `tests/verify.js`：语法编译、核心逻辑、外部新特性行为链断言。
 - `tests/dom-mock.js`：最小浏览器 API 桩。canvas 2D 上下文用 Proxy 兜底，`requestAnimationFrame` 只登记回调、不自动执行，因此 `app.init()` 的主循环不会在测试中跑飞，可由测试手动推进单帧；另提供 `pathOps`/`drawImages` 计数器供基准使用。
 - `tests/runtime.js`：在独立 VM 中按依赖顺序真实加载全部 8 个模块并触发 `DOMContentLoaded`，覆盖 `environment.js`、`ui.js`、`app.js` 的运行时行为、环境渐变缓存、天气上限、红点目标边界、护照/快照交互、实体上限、DPR、视口裁剪与离屏缓存失效条件、存档往返、喵视角、自适应画质与手动 Q 切换。
 - `tests/bench.js`：可复现性能基准（`node tests/bench.js`，可用 `BENCH_FRAMES` 覆盖帧数）。输出每帧渐变创建数、路径操作数、drawImage 次数与 JS 耗时，high/low 两档对比，不设阈值断言。
+- `tests/soak.js`：压力与鲁棒性断言。从源码提取全部 22 个状态逐一渲染，并用绘制参数守卫把 Canvas 静默吞掉的 NaN 变成失败；以可控 rAF 时钟推进 3000 帧随机工具切换／点击／天气切换仿真，检查坐标、速度、生理值、实体上限与 rAF 队列；另含异常 dt、画布边界 0 坐标与视觉体型的回归用例。
 
 最终实测（Node v24.15.0，300 帧，1920×1080，DPR=2）：
 

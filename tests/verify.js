@@ -670,6 +670,9 @@ test('凌晨暴走写满能量、弹射初速与狂飙意图', () => {
 const { registerRuntimeTests } = require('./runtime');
 registerRuntimeTests({ basePath, fs, vm, assert, test });
 
+const { registerSoakTests } = require('./soak');
+registerSoakTests({ basePath, fs, vm, assert, test });
+
 // ---------------------------------------------------------------------------
 // 7. 汇总
 // ---------------------------------------------------------------------------

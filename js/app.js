@@ -226,8 +226,10 @@
     // 屏幕像素坐标转世界坐标
     getWorldPos(e) {
       const rect = this.canvas.getBoundingClientRect();
-      const clientX = e.clientX || (e.touches && e.touches[0].clientX);
-      const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+      const touch = e.touches && e.touches[0];
+      // 0 是合法坐标（画布顶边/左边），不能用 || 回退，否则会取到 undefined 并污染世界坐标
+      const clientX = e.clientX ?? (touch ? touch.clientX : 0);
+      const clientY = e.clientY ?? (touch ? touch.clientY : 0);
       const screenX = clientX - rect.left;
       const screenY = clientY - rect.top;
 
