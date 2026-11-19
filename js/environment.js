@@ -116,6 +116,53 @@
       const floorY = physicsWorld.getFloorY(height);
       const isDay = this.theme === 'sunny_day';
 
+      // 0. 豪宅天花板实木顶梁与吊灯体系 (消除上层虚空感)
+      ctx.fillStyle = isDay ? '#b88b5a' : '#151620';
+      ctx.fillRect(0, 0, width, 14);
+      ctx.fillStyle = isDay ? '#deb887' : '#1f212f';
+      ctx.fillRect(0, 14, width, 6);
+      ctx.strokeStyle = isDay ? '#8b5a2b' : '#0b0c12';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(0, 0, width, 20);
+
+      // 三大分区优雅建筑实木立柱 (Zone Dividers: x=1000 露台/客厅界, x=2000 客厅/高塔界)
+      [1000, 2000].forEach(px => {
+        ctx.fillStyle = isDay ? 'rgba(210, 180, 140, 0.25)' : 'rgba(25, 27, 38, 0.45)';
+        ctx.fillRect(px - 14, 0, 28, floorY);
+        ctx.strokeStyle = isDay ? 'rgba(139, 90, 43, 0.2)' : 'rgba(255, 255, 255, 0.05)';
+        ctx.strokeRect(px - 14, 0, 28, floorY);
+      });
+
+      // 三大分区高空气质小吊灯 (Pendant Ambient Lamps)
+      [500, 1480, 2500].forEach(lx => {
+        // 细吊线
+        ctx.strokeStyle = isDay ? '#a0522d' : '#4b6584';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(lx, 20);
+        ctx.lineTo(lx, 75);
+        ctx.stroke();
+
+        // 暖黄柔光灯罩
+        ctx.fillStyle = isDay ? '#f7d794' : '#fdcb6e';
+        ctx.beginPath();
+        ctx.moveTo(lx - 15, 95);
+        ctx.lineTo(lx + 15, 95);
+        ctx.lineTo(lx + 8, 75);
+        ctx.lineTo(lx - 8, 75);
+        ctx.closePath();
+        ctx.fill();
+
+        // 柔和环境光晕
+        const glowGrad = ctx.createRadialGradient(lx, 95, 4, lx, 110, 70);
+        glowGrad.addColorStop(0, isDay ? 'rgba(254, 202, 87, 0.28)' : 'rgba(254, 202, 87, 0.16)');
+        glowGrad.addColorStop(1, 'rgba(254, 202, 87, 0)');
+        ctx.fillStyle = glowGrad;
+        ctx.beginPath();
+        ctx.arc(lx, 110, 70, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
       // 1. 实木地板 (从安全线 floorY 到底部)
       ctx.fillStyle = isDay ? '#cda372' : '#1c1e28';
       ctx.fillRect(0, floorY, width, height - floorY);

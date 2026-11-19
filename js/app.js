@@ -23,6 +23,10 @@
     WallPerch,
     WindowSill,
     SmartFeeder,
+    CatSuspensionBridge,
+    AerialHammock,
+    WallClimbLadder,
+    CeilingDanglingToy,
     WaterMug,
     WaterPuddle,
     BREEDS,
@@ -101,27 +105,39 @@
     }
 
     // 初始化超宽大平层三区豪宅：阳光露台 (0-1000) | 豪华客厅 (1000-2000) | 游乐高塔 (2000-3000)
+    // 构建立体三维猫道走廊：每区均设专属猫爬架，空中有悬索桥、高空吊床、阶梯爬道与风铃玩具，彻底告别空旷！
     initDefaultScene() {
       const floorY = physicsWorld.getFloorY(this.height);
 
-      // --- 1. 左翼：阳光全景温室露台 (Sunlit Solarium) ---
-      this.furniture.push(new WindowSill(260, this.height * 0.28, 200, 150));
-      this.furniture.push(new WallPerch(540, floorY - 240, 130, 16));
-      this.furniture.push(new CardboardBox(380, floorY - 25));
+      // --- 1. 左翼：阳光全景温室露台 (Sunlit Solarium, 0-1000) ---
+      this.furniture.push(new WindowSill(240, this.height * 0.28, 200, 150));
+      this.furniture.push(new WallClimbLadder(360, floorY - 50, 3, 1, 65, 12, 70, -60));
+      this.furniture.push(new CatTree(640, floorY)); // 露台温室景观猫爬架！
+      this.furniture.push(new WallPerch(820, floorY - 240, 130, 16));
+      this.furniture.push(new CeilingDanglingToy(740, floorY - 280, '#ff7675'));
+      this.furniture.push(new CardboardBox(450, floorY - 25));
 
-      // --- 2. 中央：豪华猫咪大客厅 (Grand Living Room) ---
-      // 智能自动出粮投喂机 (全自动宠溺供粮)
-      this.furniture.push(new SmartFeeder(1220, floorY));
-      this.furniture.push(new Roomba(1480, floorY - 20));
-      this.furniture.push(new WallPerch(1720, floorY - 220, 130, 16));
-      this.toys.push(new WaterMug(1730, floorY - 235)); // 跳台边缘水杯，等待被推落打翻！
+      // --- 2. 中央：豪华猫咪大客厅 (Grand Living Room, 1000-2000) ---
+      this.furniture.push(new SmartFeeder(1180, floorY)); // 智能自动出粮投喂机
+      this.furniture.push(new WallClimbLadder(1020, floorY - 50, 3, 1, 65, 12, 70, -60));
+      this.furniture.push(new CatTree(1380, floorY)); // 大客厅中央豪华巨型猫爬架！
+      this.furniture.push(new Roomba(1520, floorY - 20));
+      this.furniture.push(new WallPerch(1240, floorY - 240, 120, 16));
+      this.furniture.push(new CatSuspensionBridge(1640, floorY - 240, 280, 18)); // 空中悬索天桥跨越客厅！
+      this.furniture.push(new WallPerch(1860, floorY - 240, 130, 16));
+      this.toys.push(new WaterMug(1870, floorY - 255)); // 跳台边缘水杯，等待被推落打翻！
+      this.furniture.push(new AerialHammock(1540, floorY - 320, 115, 34)); // 天花板高空全景吊床！
+      this.furniture.push(new CeilingDanglingToy(1760, floorY - 290, '#55efc4'));
       this.toys.push(new YarnBall(1620, floorY - 60));
 
-      // --- 3. 右翼：极限运动游乐高塔 (Adventure Playground) ---
-      this.furniture.push(new Scratcher(2180, floorY));
-      this.furniture.push(new CatTree(2460, floorY));
-      this.furniture.push(new WallPerch(2680, floorY - 260, 140, 16));
-      this.furniture.push(new WallPerch(2860, floorY - 170, 120, 16));
+      // --- 3. 右翼：极限运动游乐高塔 (Adventure Playground, 2000-3000) ---
+      this.furniture.push(new Scratcher(2140, floorY));
+      this.furniture.push(new WallClimbLadder(2240, floorY - 50, 3, 1, 65, 12, 70, -60));
+      this.furniture.push(new CatTree(2520, floorY)); // 游乐高塔攀爬树！
+      this.furniture.push(new WallPerch(2720, floorY - 260, 140, 16));
+      this.furniture.push(new CatSuspensionBridge(2860, floorY - 240, 220, 18));
+      this.furniture.push(new WallPerch(2980, floorY - 170, 110, 16));
+      this.furniture.push(new CeilingDanglingToy(2630, floorY - 300, '#fd79a8'));
       this.toys.push(new CardboardBox(2760, floorY - 25));
 
       // 默认生成 3 只可爱猫咪，分布在不同区域
@@ -210,13 +226,64 @@
         this.mouse.isDown = true;
         this.lastMousePos = { x: pos.x, y: pos.y };
 
-        // 2. 检测是否按中了智能自动投喂机 (点击一键手动加餐喷粮)
+        // 2. 检测是否按中了家具进行特色交互 (投喂机/猫爬架玩球登高/吊床摇摆/风铃羽毛球/空中天桥)
         for (let f of this.furniture) {
           if (f.type === 'feeder') {
             if (Math.abs(f.x - pos.x) < f.w && Math.abs(f.y - pos.y) < f.h) {
               f.dispense(this);
               uiManager.showToast('🥣 触发智能投喂机一键开饭！香脆小鱼干喷出！');
               return;
+            }
+          } else if (f.type === 'cattree') {
+            // 点击吊球拨动玩耍
+            if (f.dangleBall && Math.hypot(f.dangleBall.x - pos.x, f.dangleBall.y - pos.y) < 26) {
+              f.batDangleBall(Math.random() < 0.5 ? 1 : -1);
+              this.spawnParticle(f.dangleBall.x, f.dangleBall.y, '🐾🎈');
+              return;
+            }
+            // 点击爬架本体：唤起就近猫咪开启征服猫爬架大计！
+            if (Math.abs(f.x - pos.x) < f.width / 2 + 10 && pos.y >= f.y - 240 && pos.y <= f.y) {
+              const nearestCat = this.cats.filter(c => !c.isGrabbed).sort((a,b) => Math.hypot(a.x - f.x, a.y - f.y) - Math.hypot(b.x - f.x, b.y - f.y))[0];
+              if (nearestCat) {
+                nearestCat.currentAgenda = 'TREE_CLIMB';
+                nearestCat.agendaTarget = f;
+                nearestCat.agendaPhase = 0;
+                nearestCat.agendaTimer = 480;
+                nearestCat.intentIcon = '🌳';
+                nearestCat.intentLabel = '征服猫爬架';
+                nearestCat.speak('收到铲屎官召唤！这就去征服猫爬架！🌳✨');
+                uiManager.showToast('🌳 唤起猫咪征服豪华猫爬架！');
+                return;
+              }
+            }
+          } else if (f.type === 'hammock') {
+            if (Math.abs(f.x - pos.x) < f.w / 2 && Math.abs(f.y - pos.y) < 30) {
+              f.nudge(0.08);
+              this.spawnParticle(f.x, f.y, '☁️✨');
+              uiManager.showToast('☁️ 轻轻推动空中全景吊床~');
+              return;
+            }
+          } else if (f.type === 'ceiling_toy') {
+            if (Math.abs(f.x + f.offsetX - pos.x) < 28 && Math.abs(f.y - pos.y) < 28) {
+              f.batToy((Math.random() - 0.5) * 8, -6);
+              this.spawnParticle(f.x + f.offsetX, f.y, '🔔✨');
+              uiManager.showToast('🔔 拨动天花板风铃羽毛球！叮当脆响~');
+              return;
+            }
+          } else if (f.type === 'bridge') {
+            if (Math.abs(f.x - pos.x) < f.w / 2 && Math.abs(f.y - pos.y) < 25) {
+              const nearestCat = this.cats.filter(c => !c.isGrabbed).sort((a,b) => Math.hypot(a.x - f.x, a.y - f.y) - Math.hypot(b.x - f.x, b.y - f.y))[0];
+              if (nearestCat) {
+                nearestCat.currentAgenda = 'AERIAL_PATROL';
+                nearestCat.agendaTarget = f;
+                nearestCat.agendaPhase = 0;
+                nearestCat.agendaTimer = 520;
+                nearestCat.intentIcon = '🌉';
+                nearestCat.intentLabel = '飞天巡视';
+                nearestCat.speak('收到指令！巡视空中悬索天桥！🌉🐾');
+                uiManager.showToast('🌉 唤起猫咪穿梭空中天桥！');
+                return;
+              }
             }
           }
         }
@@ -282,6 +349,12 @@
           soundEngine.playPop();
         } else if (this.currentTool === 'scratcher') {
           this.furniture.push(new Scratcher(pos.x, this.height));
+          soundEngine.playPop();
+        } else if (this.currentTool === 'bridge') {
+          this.furniture.push(new CatSuspensionBridge(pos.x, pos.y, 280));
+          soundEngine.playPop();
+        } else if (this.currentTool === 'hammock') {
+          this.furniture.push(new AerialHammock(pos.x, pos.y, 115));
           soundEngine.playPop();
         } else if (this.currentTool === 'catnip') {
           soundEngine.playPop();
@@ -643,16 +716,29 @@
           return cat;
         });
 
-        // 补齐 3000px 豪宅配套家具与自动投喂机
-        this.furniture.push(new WindowSill(260, this.height * 0.28, 200, 150));
-        this.furniture.push(new WallPerch(540, floorY - 240, 130, 16));
-        this.furniture.push(new SmartFeeder(1220, floorY));
-        this.furniture.push(new Roomba(1480, floorY - 20));
-        this.furniture.push(new WallPerch(1720, floorY - 220, 130, 16));
-        this.furniture.push(new Scratcher(2180, floorY));
-        this.furniture.push(new CatTree(2460, floorY));
-        this.furniture.push(new WallPerch(2680, floorY - 260, 140, 16));
-        this.furniture.push(new WallPerch(2860, floorY - 170, 120, 16));
+        // 补齐 3000px 豪宅配套家具、猫爬架网络与空中天桥吊床
+        this.furniture.push(new WindowSill(240, this.height * 0.28, 200, 150));
+        this.furniture.push(new WallClimbLadder(360, floorY - 50, 3, 1, 65, 12, 70, -60));
+        this.furniture.push(new CatTree(640, floorY));
+        this.furniture.push(new WallPerch(820, floorY - 240, 130, 16));
+        this.furniture.push(new CeilingDanglingToy(740, floorY - 280, '#ff7675'));
+        this.furniture.push(new SmartFeeder(1180, floorY));
+        this.furniture.push(new WallClimbLadder(1020, floorY - 50, 3, 1, 65, 12, 70, -60));
+        this.furniture.push(new CatTree(1380, floorY));
+        this.furniture.push(new Roomba(1520, floorY - 20));
+        this.furniture.push(new WallPerch(1240, floorY - 240, 120, 16));
+        this.furniture.push(new CatSuspensionBridge(1640, floorY - 240, 280, 18));
+        this.furniture.push(new WallPerch(1860, floorY - 240, 130, 16));
+        this.furniture.push(new AerialHammock(1540, floorY - 320, 115, 34));
+        this.furniture.push(new CeilingDanglingToy(1760, floorY - 290, '#55efc4'));
+        this.furniture.push(new Scratcher(2140, floorY));
+        this.furniture.push(new WallClimbLadder(2240, floorY - 50, 3, 1, 65, 12, 70, -60));
+        this.furniture.push(new CatTree(2520, floorY));
+        this.furniture.push(new WallPerch(2720, floorY - 260, 140, 16));
+        this.furniture.push(new CatSuspensionBridge(2860, floorY - 240, 220, 18));
+        this.furniture.push(new WallPerch(2980, floorY - 170, 110, 16));
+        this.furniture.push(new CeilingDanglingToy(2630, floorY - 300, '#fd79a8'));
+        this.toys.push(new WaterMug(1870, floorY - 255));
         this.toys.push(new YarnBall(1620, floorY - 60));
 
         return true;

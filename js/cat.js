@@ -85,11 +85,12 @@
 
   const HATS = ['none', 'bell', 'bow', 'wizard', 'party'];
 
-  // 9 大真实猫生战术大计 (Feline Strategic Agendas)
+  // 10 大真实猫生战术大计 (Feline Strategic Agendas)
   const AGENDAS = {
     NONE: 'NONE',                       // 自由日常
     THRONEC_QUEST: 'THRONEC_QUEST',     // 登高霸权：夺取豪宅最高王座与蔑视俯瞰
     TREE_CLIMB: 'TREE_CLIMB',           // 阶梯攀爬：猫爬架抱柱磨爪、阶梯飞跃与狂拍吊球
+    AERIAL_PATROL: 'AERIAL_PATROL',     // 飞天巡视：穿梭空中天桥、高空俯瞰与吊床荡秋千
     STEALTH_HUNT: 'STEALTH_HUNT',       // 隐秘刺客：一二三木头人战术潜行突袭
     FEEDER_CAMP: 'FEEDER_CAMP',         // 守仓黑客：蹲守自动投喂机与猫爪拍机敲碗
     MISCHIEF_DEMO: 'MISCHIEF_DEMO',     // 搞事拆迁：跳台边缘试探轻推与暴击推物打碎
@@ -274,9 +275,10 @@
         this.vx *= drag;
         this.vy *= physicsWorld.isZeroG() ? 0.985 : 0.99;
 
-        const maxSpeed = this.state === 'zoomies' ? 10.5 : (this.state === 'pouncing' ? 8.5 : 4.5);
+        const maxSpeed = this.state === 'zoomies' ? 10.5 : (this.state === 'pouncing' || this.state === 'jumping' ? 9.5 : 4.5);
         this.vx = MathUtils.clamp(this.vx, -maxSpeed, maxSpeed);
-        this.vy = MathUtils.clamp(this.vy, -maxSpeed, maxSpeed);
+        // 纵向速度限制：绝不将纵向起跳速度扼杀在地面走速内，赋予猫咪高达 16px/frame 的自然纵跳腾空高度！
+        this.vy = MathUtils.clamp(this.vy, -16.0, 16.0);
 
         this.x += this.vx;
         this.y += this.vy;
@@ -284,33 +286,36 @@
         // 地面与高台停靠碰撞
         const floor = physicsWorld.getFloorY(height) - this.radius;
 
-        // 检查墙壁跳台与猫爬架高台 (猫咪喜爱居高临下)
+        // 检查墙壁跳台、猫爬架各层高台、空中悬索桥、高空吊床与墙壁爬梯 (立体猫道超级网络)
         let landedOnPerch = false;
-        if (this.vy >= 0 && sceneContext.furniture) {
+        if (this.vy >= -0.5 && sceneContext && sceneContext.furniture) {
           for (let f of sceneContext.furniture) {
-            if (f.type === 'perch') {
-              if (Math.abs(this.x - f.x) < f.w / 2 && Math.abs((this.y + this.radius) - f.y) < 14) {
-                this.y = f.y - this.radius;
-                this.vy = 0;
-                this.vx *= 0.8;
-                this.perchedTier = f;
-                landedOnPerch = true;
-                break;
-              }
-            } else if (f.type === 'cattree' && f.tiers) {
-              for (let tier of f.tiers) {
-                const tierY = f.y + tier.yOffset;
-                const tierX = f.x + tier.xOffset;
-                if (Math.abs(this.x - tierX) < tier.w / 2 && Math.abs((this.y + this.radius) - tierY) < 14) {
-                  this.y = tierY - this.radius;
+            // 获取所有可立足跳台平面
+            const surfaces = f.getPerchSurfaces ? f.getPerchSurfaces() : (
+              f.type === 'perch' ? [{ id: f, x: f.x, y: f.y, w: f.w, type: 'perch' }] :
+              (f.type === 'cattree' && f.tiers ? f.tiers.map(t => ({ id: t, x: f.x + t.xOffset, y: f.y + t.yOffset, w: t.w, type: 'cattree', tier: t, tree: f })) : [])
+            );
+
+            for (let s of surfaces) {
+              const halfW = (s.w || 60) / 2;
+              const catFeetY = this.y + this.radius;
+              // 水平处于跳台落脚点范围内，且纵向脚爪处于吸附着陆容差窗口内
+              if (Math.abs(this.x - s.x) <= halfW + 6) {
+                if (catFeetY >= s.y - 14 && catFeetY <= s.y + Math.max(16, this.vy + 6)) {
+                  this.y = s.y - this.radius;
                   this.vy = 0;
-                  this.vx *= 0.8;
-                  this.perchedTier = tier;
+                  this.vx *= 0.82;
+                  this.perchedTier = s.id;
                   landedOnPerch = true;
+                  if (this.state === 'jumping') {
+                    this.state = 'idle';
+                    if (soundEngine && soundEngine.playWoodThud && Math.random() < 0.4) soundEngine.playWoodThud();
+                  }
                   break;
                 }
               }
             }
+            if (landedOnPerch) break;
           }
         }
 
@@ -323,7 +328,7 @@
           this.y = floor;
           this.vy = -this.vy * 0.35;
           if (Math.abs(this.vy) < 0.2) this.vy = 0;
-          if (this.state === 'pouncing') this.state = 'idle';
+          if (this.state === 'pouncing' || this.state === 'jumping') this.state = 'idle';
         }
 
         // 地面水洼避水与湿爪甩水检测 (Puddle Avoidance & Wet Trajectory)
@@ -662,16 +667,33 @@
       }
 
       // 3.5 豪华猫爬架阶梯攀爬与玩球 (TREE_CLIMB) - 跑酷猫、好奇猫极高优先，全猫喜爱
-      if (furniture && !this.perchedTier && Math.random() < 0.6) {
-        const catTree = furniture.find(f => f.type === 'cattree');
-        if (catTree) {
+      if (furniture && !this.perchedTier && Math.random() < 0.65) {
+        const catTrees = furniture.filter(f => f.type === 'cattree');
+        if (catTrees.length > 0) {
+          const nearestTree = catTrees.sort((a, b) => Math.hypot(a.x - this.x, a.y - this.y) - Math.hypot(b.x - this.x, b.y - this.y))[0];
           this.currentAgenda = AGENDAS.TREE_CLIMB;
-          this.agendaTarget = catTree;
+          this.agendaTarget = nearestTree;
           this.agendaPhase = 0;
           this.agendaTimer = 480;
           this.intentIcon = '🌳';
           this.intentLabel = '征服猫爬架';
           this.speak('锁定豪华猫爬架！准备征服！🌳✨');
+          return true;
+        }
+      }
+
+      // 3.8 空中悬索天桥与吊床巡游 (AERIAL_PATROL) - 探索立体空间！
+      if (furniture && !this.perchedTier && Math.random() < 0.5) {
+        const aerials = furniture.filter(f => f.type === 'bridge' || f.type === 'ladder');
+        if (aerials.length > 0) {
+          const nearestAerial = aerials.sort((a, b) => Math.hypot(a.x - this.x, a.y - this.y) - Math.hypot(b.x - this.x, b.y - this.y))[0];
+          this.currentAgenda = AGENDAS.AERIAL_PATROL;
+          this.agendaTarget = nearestAerial;
+          this.agendaPhase = 0;
+          this.agendaTimer = 520;
+          this.intentIcon = '🌉';
+          this.intentLabel = '飞天巡视';
+          this.speak('出发！巡视空中猫道超级网络！🌉🐾');
           return true;
         }
       }
@@ -843,32 +865,39 @@
         const tree = this.agendaTarget;
         if (!tree) { this.currentAgenda = AGENDAS.NONE; this.intentIcon = null; return; }
         const dx = tree.x - this.x;
+        const floor = physicsWorld.getFloorY(height) - this.radius;
 
         if (this.agendaPhase === 0) {
           // 阶段0：跑向猫爬架立柱下方
           this.state = 'walking';
           this.facing = dx >= 0 ? 1 : -1;
-          this.vx = this.facing * 1.6;
+          this.vx = this.facing * 1.8;
           if (Math.abs(dx) < 35) {
             this.agendaPhase = 1;
             this.state = 'scratching';
             this.vx = 0;
-            this.stateTimer = 50;
+            this.stateTimer = 45;
             soundEngine.playScratch();
             this.speak('抱住立柱痛快磨个爪！🪵✨');
             if (sceneContext.spawnParticle) sceneContext.spawnParticle(this.x, this.y - 20, '🪵✨');
           }
         } else if (this.agendaPhase === 1) {
-          // 阶段1：磨爪完成，蓄力跃上下层第1层跳台 (Tier 0)
+          // 阶段1：磨爪完成，抛物线高空飞跃跃上下层第1层跳台 (Tier 0)
           this.state = 'scratching';
           this.vx = 0;
           if (this.stateTimer <= 0) {
             this.agendaPhase = 2;
             const t0 = tree.getTierWorldPos(0);
-            this.vy = -Math.sqrt(2 * 0.28 * Math.max(50, this.y - t0.y + 25));
-            this.vx = (t0.x - this.x) * 0.04;
-            this.state = 'idle';
-            this.stateTimer = 60;
+            const dy = Math.max(45, (this.y - t0.y) + 24);
+            this.vy = -Math.sqrt(2 * 0.28 * dy);
+            const tApex = Math.abs(this.vy) / 0.28;
+            const tFall = Math.sqrt(2 * 24 / 0.28);
+            const totalFrames = Math.max(14, tApex + tFall);
+            this.vx = (t0.x - this.x) / totalFrames;
+            this.state = 'jumping';
+            this.facing = this.vx >= 0 ? 1 : -1;
+            this.perchedTier = null;
+            this.stateTimer = Math.ceil(totalFrames) + 35;
             soundEngine.playMeow(this.pitchMod * 1.1, 'chirp');
           }
         } else if (this.agendaPhase === 2) {
@@ -877,26 +906,37 @@
             this.agendaPhase = 3;
             this.state = 'swatting';
             this.vx = 0;
-            this.stateTimer = 65;
+            this.stateTimer = 70;
             this.facing = 1;
             tree.batDangleBall(1);
             this.speak('发现摇晃红球！看我连环拍！🐾💥');
             if (sceneContext.spawnParticle) sceneContext.spawnParticle(tree.dangleBall.x, tree.dangleBall.y, '🐾🎈');
+          } else if (this.stateTimer <= 0 || (this.y >= floor - 5 && this.vy >= 0 && this.state !== 'jumping')) {
+            // 安全机制：重试跳跃
+            this.agendaPhase = 1;
+            this.state = 'scratching';
+            this.stateTimer = 25;
           }
         } else if (this.agendaPhase === 3) {
           // 阶段3：拍打吊球，随后跃上顶层高台王座 (Tier 1)
           this.state = 'swatting';
           this.vx = 0;
-          if (this.stateTimer % 20 === 0) {
+          if (this.stateTimer % 22 === 0) {
             tree.batDangleBall(Math.random() < 0.5 ? 1 : -1);
           }
           if (this.stateTimer <= 0) {
             this.agendaPhase = 4;
             const t1 = tree.getTierWorldPos(1);
-            this.vy = -Math.sqrt(2 * 0.28 * Math.max(50, this.y - t1.y + 25));
-            this.vx = (t1.x - this.x) * 0.04;
-            this.state = 'idle';
-            this.stateTimer = 60;
+            const dy = Math.max(45, (this.y - t1.y) + 24);
+            this.vy = -Math.sqrt(2 * 0.28 * dy);
+            const tApex = Math.abs(this.vy) / 0.28;
+            const tFall = Math.sqrt(2 * 24 / 0.28);
+            const totalFrames = Math.max(14, tApex + tFall);
+            this.vx = (t1.x - this.x) / totalFrames;
+            this.state = 'jumping';
+            this.facing = this.vx >= 0 ? 1 : -1;
+            this.perchedTier = null;
+            this.stateTimer = Math.ceil(totalFrames) + 35;
             soundEngine.playMeow(this.pitchMod * 1.2, 'chirp');
           }
         } else if (this.agendaPhase === 4) {
@@ -906,6 +946,10 @@
             this.state = 'judging_overlook';
             this.stateTimer = 220;
             this.speak('成功登顶豪华猫爬架！俯瞰整座江山~ 👑🌳');
+          } else if (this.stateTimer <= 0 || (this.y >= floor - 5 && this.vy >= 0 && this.state !== 'jumping')) {
+            this.agendaPhase = 1;
+            this.state = 'scratching';
+            this.stateTimer = 25;
           }
         } else if (this.agendaPhase === 5) {
           this.state = 'judging_overlook';
@@ -917,24 +961,140 @@
             this.stateTimer = 160;
           }
         }
+      } else if (this.currentAgenda === AGENDAS.AERIAL_PATROL) {
+        const route = this.agendaTarget;
+        if (!route) { this.currentAgenda = AGENDAS.NONE; this.intentIcon = null; return; }
+        const floor = physicsWorld.getFloorY(height) - this.radius;
+
+        if (this.agendaPhase === 0) {
+          // 阶段0：跑向空中天桥 / 爬梯引桥起点
+          const targetX = route.type === 'bridge' ? (route.x - route.w / 2 + 25) : (route.type === 'ladder' ? route.steps[0].x : route.x);
+          const dx = targetX - this.x;
+          this.state = 'walking';
+          this.facing = dx >= 0 ? 1 : -1;
+          this.vx = this.facing * 1.8;
+          if (Math.abs(dx) < 45) {
+            this.agendaPhase = 1;
+            // 纵身起跳跃上首段平台
+            const targetY = route.type === 'bridge' ? route.y : (route.type === 'ladder' ? route.steps[0].y : route.y);
+            const dy = Math.max(45, (this.y - targetY) + 24);
+            this.vy = -Math.sqrt(2 * 0.28 * dy);
+            const tApex = Math.abs(this.vy) / 0.28;
+            const tFall = Math.sqrt(2 * 24 / 0.28);
+            const totalFrames = Math.max(14, tApex + tFall);
+            this.vx = dx / totalFrames;
+            this.state = 'jumping';
+            this.facing = this.vx >= 0 ? 1 : -1;
+            this.perchedTier = null;
+            this.stateTimer = Math.ceil(totalFrames) + 35;
+            soundEngine.playMeow(this.pitchMod * 1.1, 'chirp');
+            this.speak('发现空中超级天桥！起跳登桥！🌉✨');
+          }
+        } else if (this.agendaPhase === 1) {
+          // 阶段1：着陆在桥端，开始在空中悬索桥上巡游
+          if (this.perchedTier) {
+            this.agendaPhase = 2;
+            this.state = 'walking';
+            this.facing = 1;
+            this.stateTimer = 160;
+          } else if (this.stateTimer <= 0 || (this.y >= floor - 5 && this.vy >= 0 && this.state !== 'jumping')) {
+            this.currentAgenda = AGENDAS.NONE;
+            this.intentIcon = null;
+            this.state = 'idle';
+          }
+        } else if (this.agendaPhase === 2) {
+          // 阶段2：优雅在悬索桥上踱步
+          this.state = 'walking';
+          this.vx = this.facing * 1.2;
+          if (route.type === 'bridge' && Math.abs(this.x - route.x) < 25) {
+            // 走到桥中央，驻足俯瞰！
+            this.agendaPhase = 3;
+            this.state = 'judging_overlook';
+            this.vx = 0;
+            this.stateTimer = 100;
+            this.speak('站在悬索桥正中央，两脚兽都在脚下喵~ 🐾👑');
+            if (sceneContext.spawnParticle) sceneContext.spawnParticle(this.x, this.y - 20, '✨👑');
+          } else if (this.stateTimer <= 0) {
+            this.agendaPhase = 3;
+            this.state = 'judging_overlook';
+            this.stateTimer = 80;
+          }
+        } else if (this.agendaPhase === 3) {
+          this.state = 'judging_overlook';
+          this.vx = 0;
+          if (this.stateTimer <= 0) {
+            // 检查周边是否有高空吊床 (AerialHammock) 进行午休！
+            let nearbyHammock = null;
+            if (sceneContext.furniture) {
+              nearbyHammock = sceneContext.furniture.find(f => f.type === 'hammock' && Math.abs(f.x - this.x) < 260);
+            }
+            if (nearbyHammock) {
+              this.agendaPhase = 4;
+              const dy = Math.max(35, (this.y - nearbyHammock.y) + 20);
+              this.vy = -Math.sqrt(2 * 0.28 * dy);
+              const tApex = Math.abs(this.vy) / 0.28;
+              const tFall = Math.sqrt(2 * 20 / 0.28);
+              const totalFrames = Math.max(14, tApex + tFall);
+              this.vx = (nearbyHammock.x - this.x) / totalFrames;
+              this.state = 'jumping';
+              this.facing = this.vx >= 0 ? 1 : -1;
+              this.perchedTier = null;
+              this.stateTimer = Math.ceil(totalFrames) + 35;
+              this.agendaTarget = nearbyHammock;
+              soundEngine.playMeow(this.pitchMod * 1.15, 'pleading');
+              this.speak('飞入空中吊床！舒舒服服睡大觉~ ☁️💤');
+            } else {
+              this.currentAgenda = AGENDAS.NONE;
+              this.intentIcon = null;
+              this.state = 'loaf';
+              this.stateTimer = 180;
+            }
+          }
+        } else if (this.agendaPhase === 4) {
+          // 阶段4：在吊床中安然入眠
+          if (this.perchedTier === this.agendaTarget || this.stateTimer <= 0) {
+            this.agendaPhase = 5;
+            this.state = 'loaf';
+            this.stateTimer = 220;
+            this.speak('吊床晃晃悠悠，太惬意了~ ☁️💖');
+            if (this.agendaTarget && this.agendaTarget.nudge) this.agendaTarget.nudge(0.06);
+          }
+        } else if (this.agendaPhase === 5) {
+          this.state = 'loaf';
+          this.vx = 0;
+          if (Math.random() < 0.05 && sceneContext.spawnParticle) {
+            sceneContext.spawnParticle(this.x + (Math.random() - 0.5) * 20, this.y - 25, '☁️✨');
+          }
+          if (this.stateTimer <= 0) {
+            this.currentAgenda = AGENDAS.NONE;
+            this.intentIcon = null;
+            this.state = 'idle';
+          }
+        }
       } else if (this.currentAgenda === AGENDAS.THRONEC_QUEST) {
         const throne = this.agendaTarget;
         if (!throne) { this.currentAgenda = AGENDAS.NONE; this.intentIcon = null; return; }
         const dx = throne.x - this.x;
+        const floor = physicsWorld.getFloorY(height) - this.radius;
 
         if (this.agendaPhase === 0) {
           // 走近跳台下方
           this.state = 'walking';
           this.facing = dx >= 0 ? 1 : -1;
-          this.vx = this.facing * 1.6;
+          this.vx = this.facing * 1.8;
           if (Math.abs(dx) < 65) {
             this.agendaPhase = 1;
             // 纵身起跳精准落在跳台
-            const dy = this.y - throne.y;
-            this.vy = -Math.sqrt(2 * 0.28 * Math.max(50, dy + 28));
-            this.vx = dx * 0.04;
-            this.state = 'idle';
-            this.stateTimer = 80;
+            const dy = Math.max(45, (this.y - throne.y) + 26);
+            this.vy = -Math.sqrt(2 * 0.28 * dy);
+            const tApex = Math.abs(this.vy) / 0.28;
+            const tFall = Math.sqrt(2 * 26 / 0.28);
+            const totalFrames = Math.max(14, tApex + tFall);
+            this.vx = dx / totalFrames;
+            this.state = 'jumping';
+            this.facing = this.vx >= 0 ? 1 : -1;
+            this.perchedTier = null;
+            this.stateTimer = Math.ceil(totalFrames) + 40;
             soundEngine.playMeow(this.pitchMod * 1.15, 'chirp');
           }
         } else if (this.agendaPhase === 1) {
@@ -966,6 +1126,10 @@
               this.stateTimer = 220;
               this.speak('俯瞰朕的江山！高处不胜寒~ 👑✨');
             }
+          } else if (this.stateTimer <= 0 || (this.y >= floor - 5 && this.vy >= 0 && this.state !== 'jumping')) {
+            this.currentAgenda = AGENDAS.NONE;
+            this.intentIcon = null;
+            this.state = 'idle';
           }
         } else if (this.agendaPhase === 2) {
           // 对决倒计时中
@@ -1649,6 +1813,34 @@
           ctx.beginPath();
           ctx.roundRect(-this.radius * 1.05, 0, this.radius * 2.1, this.radius * 1.1, [12]);
           ctx.fillStyle = this.breed.bodyColor;
+          ctx.fill();
+        } else if (this.state === 'jumping' || this.state === 'pouncing') {
+          // 飞跃腾空姿态 (Aerial Leap Pose) - 身体前倾流线延伸，前爪向前探伸，后爪向后蹬直
+          const leapAngle = Math.atan2(this.vy, Math.abs(this.vx) + 0.1) * 0.42;
+          ctx.rotate(leapAngle * this.facing);
+          ctx.scale(1.18, 0.8);
+
+          // 躯干流线拉长
+          ctx.beginPath();
+          ctx.ellipse(0, 4, this.radius * 1.1, this.radius * 0.8, 0, 0, Math.PI * 2);
+          ctx.fillStyle = this.breed.bodyColor;
+          ctx.fill();
+
+          // 肚皮
+          ctx.beginPath();
+          ctx.ellipse(this.facing * 3, 6, this.radius * 0.65, this.radius * 0.5, 0, 0, Math.PI * 2);
+          ctx.fillStyle = this.breed.bellyColor;
+          ctx.fill();
+
+          // 前爪向前探伸
+          ctx.fillStyle = this.breed.bodyColor;
+          ctx.beginPath();
+          ctx.ellipse(this.facing * 16, 8, 7, 3.5, this.facing * 0.3, 0, Math.PI * 2);
+          ctx.fill();
+
+          // 后爪向后蹬直
+          ctx.beginPath();
+          ctx.ellipse(-this.facing * 16, 7, 8, 3.2, -this.facing * 0.2, 0, Math.PI * 2);
           ctx.fill();
         } else {
           // 标准步态与踩奶肉爪

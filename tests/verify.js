@@ -221,6 +221,7 @@ if (catB.vy < 0 && Math.abs(catB.vx) > 0) {
 
 // 12. 测试猫爬架阶梯攀爬与吊球拍打 (CatTree Climbing & Bat Dangle Ball)
 const catTree = new (mockWindow.CyberMeow.CatTree)(800, 500);
+mockScene.furniture = [catTree];
 catTree.batDangleBall(1);
 if (Math.abs(catTree.dangleBall.vx) > 0) {
   console.log(`✅ [猫爬架吊球物理拍打测试通过] 吊球摆动初速度: ${catTree.dangleBall.vx.toFixed(2)}`);
@@ -232,6 +233,66 @@ testCat.x = 800; testCat.y = 500;
 testCat.runAgenda(1920, 1080, mockScene);
 if (testCat.agendaPhase >= 1) {
   console.log(`✅ [猫爬架阶梯攀爬大计推进测试通过] 当前推进阶段: ${testCat.agendaPhase}, 状态: ${testCat.state}`);
+}
+
+// 13. 测试纵向起跳极限速度解禁 (Unclamped High Leap Physics)
+testCat.state = 'jumping';
+testCat.vy = -12.5;
+testCat.update(1920, 1080, mockScene);
+if (testCat.vy <= -10.0) {
+  console.log(`✅ [纵向起跳速度解禁测试通过] 飞跃速度正常保留: vy=${testCat.vy.toFixed(2)} (突破 4.5px 限制)`);
+}
+
+// 14. 测试猫爬架跳台精准停靠判定 (CatTree Tier Perching)
+testCat.x = catTree.x + catTree.tiers[0].xOffset;
+testCat.y = catTree.y + catTree.tiers[0].yOffset - testCat.radius - 2;
+testCat.vy = 1.5;
+testCat.update(1920, 1080, mockScene);
+if (testCat.perchedTier === catTree.tiers[0]) {
+  console.log(`✅ [猫爬架平台精准停靠测试通过] 成功停靠在: ${catTree.tiers[0].name}`);
+}
+
+// 15. 测试空中猫道悬索桥动态下沉与物理平面 (CatSuspensionBridge)
+const bridge = new (mockWindow.CyberMeow.CatSuspensionBridge)(1500, 300, 280);
+const bridgeSurfaces = bridge.getPerchSurfaces();
+bridge.update(1920, 1080, mockScene);
+if (bridgeSurfaces.length > 0 && bridgeSurfaces[0].type === 'bridge') {
+  console.log(`✅ [空中猫道悬索桥测试通过] 桥跨度: ${bridge.w}px, 木板数量: ${bridge.plankCount}`);
+}
+
+// 16. 测试空中全景吊床摆动与立足判定 (AerialHammock)
+const hammock = new (mockWindow.CyberMeow.AerialHammock)(1500, 200, 115);
+hammock.nudge(0.12);
+hammock.update(1920, 1080, mockScene);
+const hammockSurfaces = hammock.getPerchSurfaces();
+if (hammockSurfaces.length > 0 && Math.abs(hammock.swaySpeed) > 0) {
+  console.log(`✅ [空中全景吊床测试通过] 摆动初速度: ${hammock.swaySpeed.toFixed(3)}, 停靠面: ${hammockSurfaces[0].type}`);
+}
+
+// 17. 测试阶梯式猫步道多级踏板 (WallClimbLadder)
+const ladder = new (mockWindow.CyberMeow.WallClimbLadder)(1000, 500, 3);
+const ladderSurfaces = ladder.getPerchSurfaces();
+if (ladderSurfaces.length === 3) {
+  console.log(`✅ [阶梯式猫步道测试通过] 踏板分级数量: ${ladderSurfaces.length} 级阶梯`);
+}
+
+// 18. 测试天花板悬吊风铃羽毛球谐振阻尼 (CeilingDanglingToy)
+const ceilingToy = new (mockWindow.CyberMeow.CeilingDanglingToy)(1500, 180);
+ceilingToy.batToy(5, -6);
+ceilingToy.update(1920, 1080);
+if (Math.abs(ceilingToy.vy) > 0 || Math.abs(ceilingToy.vx) > 0) {
+  console.log(`✅ [天花板风铃羽毛球谐振测试通过] 弹性回弹初速度: vy=${ceilingToy.vy.toFixed(2)}, vx=${ceilingToy.vx.toFixed(2)}`);
+}
+
+// 19. 测试飞天巡视战术大计 (AERIAL_PATROL Agenda)
+testCat.currentAgenda = AGENDAS.AERIAL_PATROL;
+testCat.agendaTarget = bridge;
+testCat.agendaPhase = 0;
+testCat.x = bridge.x - bridge.w / 2;
+testCat.y = 500;
+testCat.runAgenda(1920, 1080, mockScene);
+if (testCat.agendaPhase >= 1) {
+  console.log(`✅ [飞天巡视空中网络大计推进测试通过] 当前推进阶段: ${testCat.agendaPhase}, 状态: ${testCat.state}`);
 }
 
 console.log('\n🎉 所有核心模块、猫生战术脑与混沌深度交叉逻辑测试均成功通过！');

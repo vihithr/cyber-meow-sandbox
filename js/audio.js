@@ -519,6 +519,44 @@
       osc.stop(now + 0.08);
     }
 
+    // --- 清脆铜铃铛 / 风铃羽毛玩具声 ---
+    playBell() {
+      if (this.isMuted) return;
+      this.init();
+      const now = this.ctx.currentTime;
+      // 双谐波闪烁金属音 (High sine chime pair)
+      [1800, 2750].forEach((freq, idx) => {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq + (Math.random() - 0.5) * 40, now);
+        gain.gain.setValueAtTime(0.12 / (idx + 1), now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+        osc.connect(gain);
+        gain.connect(this.sfxGain);
+        osc.start(now);
+        osc.stop(now + 0.48);
+      });
+    }
+
+    // --- 实木跳台踏板 / 悬索桥木板轻踏声 ---
+    playWoodThud() {
+      if (this.isMuted) return;
+      this.init();
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(140 + Math.random() * 30, now);
+      osc.frequency.exponentialRampToValueAtTime(55, now + 0.08);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now);
+      osc.stop(now + 0.09);
+    }
+
     // --- 程序化极简 Lofi 氛围生成乐 (温和五声音阶循环) ---
     toggleBGM() {
       this.bgmEnabled = !this.bgmEnabled;
