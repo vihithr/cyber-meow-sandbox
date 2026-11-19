@@ -399,6 +399,26 @@
       this.w = 22;
       this.h = 28;
       this.isBroken = false;
+      this.wobbleAngle = 0;
+    }
+
+    // 猫爪试探轻推 (Gentle Test Tap)
+    nudge(dir = 1) {
+      this.vx = dir * 1.2;
+      this.wobbleAngle = dir * 0.35;
+      if (window.CyberMeow.soundEngine) {
+        window.CyberMeow.soundEngine.playPop();
+      }
+    }
+
+    // 猫爪暴击推落 (Final Smash Knocks Off)
+    smash(dir = 1) {
+      this.vx = dir * (4.8 + Math.random() * 1.8);
+      this.vy = -3.0;
+      this.wobbleAngle = dir * 0.8;
+      if (window.CyberMeow.soundEngine) {
+        window.CyberMeow.soundEngine.playBounce();
+      }
     }
 
     update(width, height, sceneContext) {
@@ -409,12 +429,15 @@
       this.x += this.vx;
       this.y += this.vy;
 
+      // 摇晃阻尼
+      this.wobbleAngle *= 0.91;
+
       // 跳台与地面检测
       const floor = physicsWorld.getFloorY(height) - this.h / 2;
       if (this.y >= floor) {
         this.y = floor;
         // 高空坠地直接打翻摔碎，生成一滩水洼！
-        if (Math.abs(this.vy) > 3.5 || Math.abs(this.vx) > 1.0) {
+        if (Math.abs(this.vy) > 3.0 || Math.abs(this.vx) > 0.8) {
           this.spillWater(sceneContext, width, height);
         } else {
           this.vy = 0;
@@ -426,7 +449,11 @@
       if (this.isBroken) return;
       this.isBroken = true;
       if (window.CyberMeow.soundEngine) {
-        window.CyberMeow.soundEngine.playPop();
+        if (window.CyberMeow.soundEngine.playWaterSplash) {
+          window.CyberMeow.soundEngine.playWaterSplash();
+        } else {
+          window.CyberMeow.soundEngine.playPop();
+        }
       }
       if (sceneContext && sceneContext.toys) {
         sceneContext.toys.push(new WaterPuddle(this.x, physicsWorld.getFloorY(height) - 4));
@@ -441,6 +468,7 @@
       if (this.isBroken) return;
       ctx.save();
       ctx.translate(this.x, this.y);
+      ctx.rotate(this.wobbleAngle);
 
       // 杯身
       ctx.fillStyle = '#ffffff';
@@ -475,6 +503,10 @@
       this.w = 65;
       this.h = 10;
       this.life = 600; // 存续时间
+    }
+
+    contains(px, py) {
+      return this.life > 0 && Math.abs(px - this.x) < this.w / 2 + 10 && Math.abs(py - this.y) < 22;
     }
 
     update(width, height, sceneContext) {

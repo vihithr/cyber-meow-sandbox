@@ -489,7 +489,28 @@
       this.h = 65;
       this.autoTimer = 180;
       this.dispenseAnim = 0;
+      this.shakeTimer = 0;
       this.foodBowlLevel = 3;
+    }
+
+    // 接收猫咪猫爪物理拍打 (Cat Paw Tap & Hacker Hack)
+    receiveTap(cat, sceneContext) {
+      this.shakeTimer = 12;
+      this.dispenseAnim = 20;
+      if (window.CyberMeow.soundEngine) {
+        window.CyberMeow.soundEngine.playPop();
+      }
+      if (sceneContext && sceneContext.spawnParticle) {
+        sceneContext.spawnParticle(this.x + (Math.random() - 0.5) * 16, this.y - 30, '🥣💥');
+      }
+
+      // 拍打敲碗有 45% 几率直接物理触发提前掉落美味小鱼干！
+      if (Math.random() < 0.45) {
+        this.dispense(sceneContext);
+        this.autoTimer = 600 + Math.random() * 250;
+        return true;
+      }
+      return false;
     }
 
     dispense(sceneContext) {
@@ -512,6 +533,7 @@
 
     update(width, height, sceneContext) {
       if (this.dispenseAnim > 0) this.dispenseAnim--;
+      if (this.shakeTimer > 0) this.shakeTimer--;
 
       this.autoTimer--;
       // 自动投喂：每隔一段时间或有猫咪想吃点心
@@ -533,7 +555,8 @@
 
     draw(ctx) {
       ctx.save();
-      ctx.translate(this.x, this.y);
+      const shakeX = this.shakeTimer > 0 ? (Math.random() - 0.5) * 3 : 0;
+      ctx.translate(this.x + shakeX, this.y);
 
       // 阴影
       ctx.beginPath();

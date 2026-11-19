@@ -85,6 +85,18 @@
 
   const HATS = ['none', 'bell', 'bow', 'wizard', 'party'];
 
+  // 8 大真实猫生战术大计 (Feline Strategic Agendas)
+  const AGENDAS = {
+    NONE: 'NONE',                       // 自由日常
+    THRONEC_QUEST: 'THRONEC_QUEST',     // 登高霸权：夺取豪宅最高王座与蔑视俯瞰
+    STEALTH_HUNT: 'STEALTH_HUNT',       // 隐秘刺客：一二三木头人战术潜行突袭
+    FEEDER_CAMP: 'FEEDER_CAMP',         // 守仓黑客：蹲守自动投喂机与猫爪拍机敲碗
+    MISCHIEF_DEMO: 'MISCHIEF_DEMO',     // 搞事拆迁：跳台边缘试探轻推与暴击推物打碎
+    BELLY_TRAP: 'BELLY_TRAP',           // 心机碰瓷：光标前翻肚皮假意求摸过载反咬
+    SUNBEAM_PILGRIM: 'SUNBEAM_PILGRIM', // 逐日朝圣：巡游大平层追随阳光光斑
+    PARKOUR_CIRCUIT: 'PARKOUR_CIRCUIT'  // 战术跑酷：三维跳台高速连跳与侧滑急停
+  };
+
   class Cat {
     constructor(x, y, customConfig = {}) {
       this.id = 'cat_' + Math.random().toString(36).substring(2, 9);
@@ -113,10 +125,22 @@
       this.laserFrustration = 0; // 追激光抓不到的挫败感
       this.overstimulation = 0; // 抚摸过载度
 
+      // --- 猫生战术策略脑 (Tactical Agenda Brain) ---
+      this.currentAgenda = AGENDAS.NONE;
+      this.agendaTarget = null;
+      this.agendaPhase = 0;
+      this.agendaTimer = 0;
+      this.intentIcon = null;
+      this.intentLabel = '';
+      this.bellyTrapPatience = 100;
+      this.rival = null;
+
       // --- 姿态与行为状态机 ---
       // 状态: 'idle', 'walking', 'stalking', 'pouncing', 'sleeping', 'loaf', 'scratching',
       //      'in_box', 'riding', 'grabbed', 'zoomies', 'swatting', 'chattering',
-      //      'catnip_high', 'tangled', 'social_bump', 'social_groom', 'slapping'
+      //      'catnip_high', 'tangled', 'social_bump', 'social_groom', 'slapping',
+      //      'stealth_stalk', 'stealth_freeze', 'feeder_camp', 'feeder_hack',
+      //      'throne_challenge', 'judging_overlook', 'belly_trap', 'wet_shake', 'puddle_jump'
       this.state = 'idle';
       this.stateTimer = 60 + Math.random() * 100;
       this.buttWiggle = 0;
@@ -171,6 +195,17 @@
       if (this.yarnCooldown > 0) this.yarnCooldown--;
       if (this.overstimulation > 0) this.overstimulation -= 0.05;
       if (this.bubbleTimer > 0) this.bubbleTimer--;
+
+      // 战术大计计时器衰减与超时恢复
+      if (this.agendaTimer > 0) {
+        this.agendaTimer--;
+        if (this.agendaTimer <= 0 && this.currentAgenda !== AGENDAS.NONE) {
+          this.currentAgenda = AGENDAS.NONE;
+          this.intentIcon = null;
+          this.state = 'idle';
+          this.stateTimer = 50;
+        }
+      }
 
       // 呼噜声平滑衰减
       if (this.purrLevel > 0) {
@@ -289,6 +324,38 @@
           if (Math.abs(this.vy) < 0.2) this.vy = 0;
           if (this.state === 'pouncing') this.state = 'idle';
         }
+
+        // 地面水洼避水与湿爪甩水检测 (Puddle Avoidance & Wet Trajectory)
+        if (sceneContext && sceneContext.toys && this.y >= floor - 6 && !this.isGrabbed) {
+          for (let t of sceneContext.toys) {
+            if (t.type === 'puddle' && t.contains) {
+              if (t.contains(this.x, this.y + this.radius) && this.state !== 'wet_shake' && this.state !== 'puddle_jump') {
+                this.state = 'wet_shake';
+                this.stateTimer = 85;
+                this.vx = 0;
+                this.currentAgenda = AGENDAS.NONE;
+                this.intentIcon = '💦';
+                this.intentLabel = '嫌弃甩爪';
+                if (soundEngine && soundEngine.playWaterSplash) soundEngine.playWaterSplash();
+                this.speak('噫！踩到水了！恶心甩爪！💦😾');
+                if (sceneContext.spawnParticle) {
+                  for (let pi = 0; pi < 3; pi++) {
+                    sceneContext.spawnParticle(this.x + (Math.random() - 0.5) * 16, this.y - 10, '💧');
+                  }
+                }
+                break;
+              }
+              if ((this.state === 'walking' || this.state === 'stealth_stalk') && t.contains(this.x + this.facing * 35, this.y + this.radius)) {
+                this.state = 'puddle_jump';
+                this.stateTimer = 35;
+                this.vy = -5.6;
+                this.vx = this.facing * 4.2;
+                this.speak('前方有水！起跳跨越！🐾✨');
+                break;
+              }
+            }
+          }
+        }
         if (this.y < this.radius + 10) {
           this.y = this.radius + 10;
           this.vy = -this.vy * 0.5;
@@ -385,6 +452,64 @@
         return;
       }
 
+      // 优先级2.6：踩中水洼狂暴甩水 (Wet Shake)
+      if (this.state === 'wet_shake') {
+        this.vx = 0;
+        if (this.stateTimer <= 0) {
+          this.state = 'idle';
+          this.stateTimer = 45;
+          this.intentIcon = null;
+          this.speak('呼…爪子终于甩干了！✨');
+        }
+        return;
+      }
+
+      // 优先级2.7：跳过水洼 (Puddle Jump)
+      if (this.state === 'puddle_jump') {
+        if (this.stateTimer <= 0) {
+          this.state = 'idle';
+          this.stateTimer = 35;
+        }
+        return;
+      }
+
+      // 优先级2.8：高台王座争霸对决 (Throne Challenge Standoff)
+      if (this.state === 'throne_challenge') {
+        this.vx = 0;
+        if (this.stateTimer <= 0) {
+          this.resolveThroneChallenge(sceneContext);
+        }
+        return;
+      }
+
+      // 优先级2.9：高台蔑视俯瞰众生 (Judging Overlook)
+      if (this.state === 'judging_overlook') {
+        this.vx = 0;
+        this.pupilDilation = 0.22;
+        if (this.stateTimer <= 0) {
+          this.currentAgenda = AGENDAS.NONE;
+          this.intentIcon = null;
+          this.state = 'loaf';
+          this.stateTimer = 180;
+          this.speak('俯瞰完毕，高台母鸡蹲~ 🍞');
+        }
+        return;
+      }
+
+      // 优先级2.95：心机碰瓷肚皮陷阱 (Belly Trap)
+      if (this.state === 'belly_trap') {
+        this.vx = 0;
+        this.purrLevel = Math.max(0.4, this.purrLevel);
+        if (this.stateTimer <= 0) {
+          this.currentAgenda = AGENDAS.NONE;
+          this.intentIcon = null;
+          this.state = 'idle';
+          this.stateTimer = 60;
+          this.speak('两脚兽居然不上钩？真不懂享受！😼');
+        }
+        return;
+      }
+
       // 优先级3：猫薄荷癫狂翻滚
       if (this.catnipEnergy > 0) {
         return;
@@ -450,69 +575,462 @@
         }
       }
 
-      // 优先级9：自主随机日常行为 (融入性格矩阵)
+      // 优先级9：猫生战术大计策略引擎 (Tactical Agenda Strategy Engine)
+      if (this.currentAgenda && this.currentAgenda !== AGENDAS.NONE) {
+        this.runAgenda(width, height, sceneContext);
+        return;
+      }
+
+      // 如果当前无大计，且日常倒计时结束，评估并启动全新的猫生大计！
       this.pupilDilation = 0.45;
       if (this.stateTimer <= 0) {
-        // 登高跳台欲望 (跑酷猫与好奇猫极度偏爱)
-        const climbBias = this.personality.id === 'ZOOMER' ? 0.55 : 0.28;
-        if (Math.random() < climbBias && sceneContext.furniture && !this.perchedTier) {
-          const perches = sceneContext.furniture.filter(f => f.type === 'perch');
-          if (perches.length > 0) {
-            const targetPerch = perches[Math.floor(Math.random() * perches.length)];
-            const dx = targetPerch.x - this.x;
-            if (Math.abs(dx) < 320 && this.y > targetPerch.y + 20) {
-              this.vy = -Math.sqrt(2 * 0.28 * (this.y - targetPerch.y + 25));
-              this.vx = dx * 0.035;
+        const startedAgenda = this.evaluateNewAgenda(sceneContext);
+        if (startedAgenda) {
+          this.runAgenda(width, height, sceneContext);
+          return;
+        }
+
+        // 若无适合的复杂大计，执行有性格倾向的惬意日常
+        const rand = Math.random();
+        if (rand < 0.45) {
+          this.state = 'loaf';
+          this.vx = 0;
+          this.stateTimer = 160 + Math.random() * 150;
+          this.speak(Math.random() < 0.5 ? '揣小爪爪，缩成面包~ 🍞' : '舒适母鸡蹲…');
+        } else if (rand < 0.78) {
+          this.state = 'walking';
+          this.facing = Math.random() < 0.5 ? 1 : -1;
+          const speedMod = this.personality.id === 'ZOOMER' ? 1.4 : (this.personality.id === 'CHILL' ? 0.7 : 1.0);
+          this.vx = this.facing * (0.8 + Math.random() * 0.9) * speedMod;
+          this.stateTimer = 50 + Math.random() * 60;
+        } else {
+          this.state = 'idle';
+          soundEngine.playMeow(this.pitchMod, 'chirp');
+          const quotes = ['铲屎的，快伺候本喵！', '喵呜~', '本喵是液体~', '粮仓满不满呀？', '晒太阳真棒~'];
+          this.speak(quotes[Math.floor(Math.random() * quotes.length)]);
+          this.stateTimer = 65;
+        }
+      }
+    }
+
+    // --- 猫生战术策略评估引擎 (Agenda Evaluator) ---
+    evaluateNewAgenda(sceneContext) {
+      if (!sceneContext) return false;
+      const { cats, furniture, toys, sunbeam, mouse } = sceneContext;
+      const pId = this.personality.id;
+
+      // 1. 贪吃猫 / 饥饿猫 -> 守仓催粮与拍机黑客 (FEEDER_CAMP)
+      if ((pId === 'GLUTTON' || this.hunger < 70) && furniture) {
+        const feeder = furniture.find(f => f.type === 'feeder');
+        if (feeder && Math.random() < 0.7) {
+          this.currentAgenda = AGENDAS.FEEDER_CAMP;
+          this.agendaTarget = feeder;
+          this.agendaPhase = 0;
+          this.agendaTimer = 450;
+          this.intentIcon = '🥣';
+          this.intentLabel = '敲碗催粮';
+          this.speak('肚子咕噜噜…去投喂机蹲点！🥣');
+          return true;
+        }
+      }
+
+      // 2. 跑酷狂人 / 高精力猫 -> 战术立体跑酷巡航 (PARKOUR_CIRCUIT)
+      if ((pId === 'ZOOMER' || this.energy > 80) && Math.random() < 0.65) {
+        this.currentAgenda = AGENDAS.PARKOUR_CIRCUIT;
+        this.agendaPhase = 0;
+        this.agendaTimer = 380;
+        this.intentIcon = '⚡';
+        this.intentLabel = '战术跑酷';
+        this.speak('能量过载！启动立体跑酷巡航！⚡💨');
+        return true;
+      }
+
+      // 3. 好奇猫 -> 蓄意推物搞事拆迁 (MISCHIEF_DEMO)
+      if (pId === 'CURIOUS' && toys) {
+        const mug = toys.find(t => t.type === 'mug' && !t.isBroken);
+        if (mug && Math.random() < 0.75) {
+          this.currentAgenda = AGENDAS.MISCHIEF_DEMO;
+          this.agendaTarget = mug;
+          this.agendaPhase = 0;
+          this.agendaTimer = 420;
+          this.intentIcon = '😏';
+          this.intentLabel = '蓄意推物';
+          this.speak('发现边缘有杯子…去推下去！😏');
+          return true;
+        }
+      }
+
+      // 4. 争夺最高王座 (THRONEC_QUEST) - 登顶俯瞰众生
+      if (furniture && !this.perchedTier && Math.random() < (pId === 'ZOOMER' ? 0.6 : 0.35)) {
+        const perches = furniture.filter(f => f.type === 'perch');
+        if (perches.length > 0) {
+          const highestPerch = perches.reduce((min, p) => p.y < min.y ? p : min, perches[0]);
+          this.currentAgenda = AGENDAS.THRONEC_QUEST;
+          this.agendaTarget = highestPerch;
+          this.agendaPhase = 0;
+          this.agendaTimer = 420;
+          this.intentIcon = '👑';
+          this.intentLabel = '争霸王座';
+          this.speak('最高处的王座属于朕！出征！👑');
+          return true;
+        }
+      }
+
+      // 5. 粘人猫 -> 心机碰瓷与肚皮陷阱 (BELLY_TRAP)
+      if (pId === 'CLINGY' && mouse && Math.random() < 0.65) {
+        this.currentAgenda = AGENDAS.BELLY_TRAP;
+        this.agendaTarget = mouse;
+        this.agendaPhase = 0;
+        this.agendaTimer = 350;
+        this.intentIcon = '💖';
+        this.intentLabel = '心机碰瓷';
+        this.speak('两脚兽在动…去前面碰瓷翻肚皮！💖');
+        return true;
+      }
+
+      // 6. 佛系咸鱼猫 -> 逐日朝圣 (SUNBEAM_PILGRIM)
+      if ((pId === 'CHILL' || Math.random() < 0.35) && sunbeam) {
+        this.currentAgenda = AGENDAS.SUNBEAM_PILGRIM;
+        this.agendaTarget = sunbeam;
+        this.agendaPhase = 0;
+        this.agendaTimer = 500;
+        this.intentIcon = '☀️';
+        this.intentLabel = '逐日打盹';
+        this.speak('寻觅温暖日光…日光浴启程！☀️');
+        return true;
+      }
+
+      // 7. 隐秘刺客尾行 (STEALTH_HUNT) - 挑选一只其他猫或扫地机
+      if (cats && cats.length > 1 && Math.random() < 0.4) {
+        const otherCats = cats.filter(c => c !== this && !c.inBox && c.state !== 'sleeping');
+        if (otherCats.length > 0) {
+          const victim = otherCats[Math.floor(Math.random() * otherCats.length)];
+          this.currentAgenda = AGENDAS.STEALTH_HUNT;
+          this.agendaTarget = victim;
+          this.agendaPhase = 0;
+          this.agendaTimer = 400;
+          this.intentIcon = '🎯';
+          this.intentLabel = '战术潜行';
+          this.speak('锁定目标…一二三木头人，启动！🎯');
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    // --- 战术策略大计具体分步执行 ---
+    runAgenda(width, height, sceneContext) {
+      if (this.currentAgenda === AGENDAS.FEEDER_CAMP) {
+        const feeder = this.agendaTarget;
+        if (!feeder) { this.currentAgenda = AGENDAS.NONE; this.intentIcon = null; return; }
+        const dx = feeder.x - this.x;
+        if (this.agendaPhase === 0) {
+          // 走向投喂机
+          this.state = 'walking';
+          this.facing = dx >= 0 ? 1 : -1;
+          this.vx = this.facing * 1.5;
+          if (Math.abs(dx) < 30) {
+            this.agendaPhase = 1;
+            this.vx = 0;
+            this.state = 'feeder_camp';
+            this.stateTimer = 85;
+            this.speak('端坐守候…粮仓里藏着小鱼干！🥣👀');
+          }
+        } else if (this.agendaPhase === 1) {
+          this.state = 'feeder_camp';
+          this.vx = 0;
+          if (this.stateTimer <= 0) {
+            this.agendaPhase = 2;
+            this.state = 'feeder_hack';
+            this.stateTimer = 65;
+            this.speak('敲碗！快吐鱼干！🥣💥');
+          }
+        } else if (this.agendaPhase === 2) {
+          this.state = 'feeder_hack';
+          this.vx = 0;
+          if (this.stateTimer % 20 === 0 && feeder.receiveTap) {
+            const gotFood = feeder.receiveTap(this, sceneContext);
+            if (gotFood) {
+              this.speak('物理黑客成功！小鱼干出来啦！🐟✨');
+              this.currentAgenda = AGENDAS.NONE;
+              this.intentIcon = null;
               this.state = 'idle';
-              this.speak(Math.random() < 0.5 ? '登高俯瞰朕的领地！' : '高处视野才是王道~');
-              soundEngine.playMeow(this.pitchMod * 1.1, 'chirp');
-              this.stateTimer = 140;
+              this.stateTimer = 60;
               return;
             }
           }
-        }
-
-        const rand = Math.random();
-        if (rand < 0.35) {
-          // 佛系猫偏好：母鸡蹲 (Loafing)
-          if (this.personality.id === 'CHILL' || rand < 0.18) {
-            this.state = 'loaf';
-            this.vx = 0;
-            this.stateTimer = 160 + Math.random() * 150;
-            this.speak(Math.random() < 0.5 ? '揣小爪爪，缩成面包~ 🍞' : '舒适母鸡蹲…');
-          } else {
-            this.state = 'idle';
-            this.vx = 0;
-            this.stateTimer = 60 + Math.random() * 80;
-          }
-        } else if (rand < 0.65) {
-          // 巡逻走动
-          this.state = 'walking';
-          this.facing = Math.random() < 0.5 ? 1 : -1;
-          const speedMod = this.personality.id === 'ZOOMER' ? 1.5 : (this.personality.id === 'CHILL' ? 0.7 : 1.0);
-          this.vx = this.facing * (0.8 + Math.random() * 1.0) * speedMod;
-          this.stateTimer = 40 + Math.random() * 80;
-        } else if (rand < 0.85) {
-          // 寻找阳光打盹
-          const sun = sceneContext.sunbeam;
-          if (sun && Math.abs(this.x - sun.x) < sun.width * 0.45) {
-            this.state = 'sleeping';
-            this.stateTimer = 220 + Math.random() * 200;
-            sceneContext.spawnParticle(this.x, this.y - 20, '💤✨');
-            this.speak('追着阳光睡个好觉~ ☀️');
-          } else {
+          if (this.stateTimer <= 0) {
+            this.speak('等会儿再来敲你！🥣😼');
+            this.currentAgenda = AGENDAS.NONE;
+            this.intentIcon = null;
             this.state = 'idle';
             this.stateTimer = 60;
           }
-        } else {
-          // 伸懒腰并撒娇呼唤
-          this.state = 'idle';
-          soundEngine.playMeow(this.pitchMod, 'chirp');
-          const quotes = ['铲屎的，快伺候本喵！', '喵呜~', '本喵是液体~', '陪我玩嘛！', '粮碗又见底啦！'];
-          this.speak(quotes[Math.floor(Math.random() * quotes.length)]);
-          this.stateTimer = 60;
+        }
+      } else if (this.currentAgenda === AGENDAS.STEALTH_HUNT) {
+        const victim = this.agendaTarget;
+        if (!victim) { this.currentAgenda = AGENDAS.NONE; this.intentIcon = null; return; }
+        const dx = victim.x - this.x;
+        const dist = Math.hypot(dx, victim.y - this.y);
+
+        if (this.agendaPhase === 0) {
+          this.facing = dx >= 0 ? 1 : -1;
+          // 一二三木头人视线检测：如果受害者是猫且正面对着刺客猫，刺客猫必须瞬间定格！
+          const victimFacingThis = (victim.facing !== undefined && ((victim.facing === 1 && this.x < victim.x) || (victim.facing === -1 && this.x > victim.x)));
+          if (victimFacingThis && dist < 220) {
+            this.state = 'stealth_freeze';
+            this.vx = 0;
+            this.pupilDilation = 0.95;
+            if (Math.random() < 0.04) this.speak('定住！它看我了！👀');
+          } else {
+            this.state = 'stealth_stalk';
+            this.vx = this.facing * 0.48;
+            this.pupilDilation = 0.85;
+          }
+
+          if (dist < 48) {
+            this.agendaPhase = 1;
+            this.state = 'stalking';
+            this.stateTimer = 45;
+            this.vx = 0;
+            this.speak('锁定猎物！屁股蓄力摇摆…🎯');
+          }
+        } else if (this.agendaPhase === 1) {
+          this.state = 'stalking';
+          this.vx = 0;
+          this.buttWiggle = Math.sin(Date.now() * 0.038) * 0.6;
+          if (this.stateTimer <= 0) {
+            // 爆发刺客伏击！
+            this.state = 'pouncing';
+            this.vy = -6.0;
+            this.vx = this.facing * 8.2;
+            soundEngine.playMeow(this.pitchMod * 1.3, 'chatter');
+            if (victim.type !== 'roomba') {
+              soundEngine.playSlap();
+              victim.vy = -6.8;
+              victim.vx = this.facing * 4.8;
+              this.speak('刺客信条！背后突袭！😼💥');
+              victim.speak('喵嗷！有刺客背后偷袭！🙀');
+              if (sceneContext.spawnParticle) sceneContext.spawnParticle(victim.x, victim.y - 15, '🐾💥');
+            } else {
+              this.ridingObj = victim;
+              victim.rider = this;
+              this.state = 'riding';
+              this.speak('潜行劫持扫地机战舰！🤖✨');
+            }
+            this.currentAgenda = AGENDAS.NONE;
+            this.intentIcon = null;
+          }
+        }
+      } else if (this.currentAgenda === AGENDAS.THRONEC_QUEST) {
+        const throne = this.agendaTarget;
+        if (!throne) { this.currentAgenda = AGENDAS.NONE; this.intentIcon = null; return; }
+        const dx = throne.x - this.x;
+
+        if (this.agendaPhase === 0) {
+          // 走近跳台下方
+          this.state = 'walking';
+          this.facing = dx >= 0 ? 1 : -1;
+          this.vx = this.facing * 1.6;
+          if (Math.abs(dx) < 65) {
+            this.agendaPhase = 1;
+            // 纵身起跳精准落在跳台
+            const dy = this.y - throne.y;
+            this.vy = -Math.sqrt(2 * 0.28 * Math.max(50, dy + 28));
+            this.vx = dx * 0.04;
+            this.state = 'idle';
+            this.stateTimer = 80;
+            soundEngine.playMeow(this.pitchMod * 1.15, 'chirp');
+          }
+        } else if (this.agendaPhase === 1) {
+          // 等待落到跳台
+          if (this.perchedTier === throne) {
+            // 检查跳台上是否有别的猫占据！
+            let rival = null;
+            if (sceneContext.cats) {
+              rival = sceneContext.cats.find(c => c !== this && c.perchedTier === throne);
+            }
+            if (rival) {
+              // 触发王座对决！
+              this.agendaPhase = 2;
+              this.state = 'throne_challenge';
+              rival.state = 'throne_challenge';
+              this.stateTimer = 85;
+              rival.stateTimer = 85;
+              this.facing = rival.x >= this.x ? 1 : -1;
+              rival.facing = -this.facing;
+              this.rival = rival;
+              if (soundEngine && soundEngine.playLowGrowl) soundEngine.playLowGrowl(this.pitchMod);
+              this.speak('此乃朕之王座，凡猫速退！👑⚡');
+              rival.speak('大胆叛逆！有本事来抢！😾');
+              if (sceneContext.spawnParticle) sceneContext.spawnParticle((this.x + rival.x) / 2, this.y - 20, '⚡⚔️');
+            } else {
+              // 无人占据，登基！
+              this.agendaPhase = 3;
+              this.state = 'judging_overlook';
+              this.stateTimer = 220;
+              this.speak('俯瞰朕的江山！高处不胜寒~ 👑✨');
+            }
+          }
+        } else if (this.agendaPhase === 2) {
+          // 对决倒计时中
+          this.state = 'throne_challenge';
+          this.vx = 0;
+          if (this.stateTimer <= 0) {
+            this.resolveThroneChallenge(sceneContext);
+            this.agendaPhase = 3;
+            this.state = 'judging_overlook';
+            this.stateTimer = 220;
+          }
+        } else if (this.agendaPhase === 3) {
+          this.state = 'judging_overlook';
+          this.vx = 0;
+          if (this.stateTimer <= 0) {
+            this.currentAgenda = AGENDAS.NONE;
+            this.intentIcon = null;
+            this.state = 'loaf';
+            this.stateTimer = 160;
+          }
+        }
+      } else if (this.currentAgenda === AGENDAS.MISCHIEF_DEMO) {
+        const mug = this.agendaTarget;
+        if (!mug || mug.isBroken) { this.currentAgenda = AGENDAS.NONE; this.intentIcon = null; return; }
+        const dx = mug.x - this.x;
+        const dy = this.y - mug.y;
+
+        if (this.agendaPhase === 0) {
+          if (this.y > mug.y + 25) {
+            // 需要先跳上高台
+            this.state = 'walking';
+            this.facing = dx >= 0 ? 1 : -1;
+            this.vx = this.facing * 1.4;
+            if (Math.abs(dx) < 60) {
+              this.vy = -Math.sqrt(2 * 0.28 * Math.max(50, dy + 25));
+              this.vx = dx * 0.04;
+            }
+          } else {
+            // 已在同高度，走近水杯
+            this.state = 'walking';
+            this.facing = dx >= 0 ? 1 : -1;
+            this.vx = this.facing * 0.9;
+            if (Math.abs(dx) < 45) {
+              // 阶段1：试探轻推！
+              this.agendaPhase = 1;
+              this.state = 'swatting';
+              this.vx = 0;
+              this.stateTimer = 50;
+              if (mug.nudge) mug.nudge(this.facing);
+              this.speak('试探轻推一下…看铲屎官反应😏');
+            }
+          }
+        } else if (this.agendaPhase === 1) {
+          this.state = 'swatting';
+          this.vx = 0;
+          if (this.stateTimer <= 0) {
+            // 阶段2：全力推落！
+            if (mug.smash) mug.smash(this.facing);
+            this.speak('啪！落体实验成功！万有引力万岁！😼💥');
+            if (sceneContext.spawnParticle) sceneContext.spawnParticle(mug.x, mug.y, '🐾💨');
+            this.currentAgenda = AGENDAS.NONE;
+            this.intentIcon = null;
+            this.state = 'idle';
+            this.stateTimer = 60;
+          }
+        }
+      } else if (this.currentAgenda === AGENDAS.BELLY_TRAP) {
+        const mouse = sceneContext.mouse;
+        if (!mouse) { this.currentAgenda = AGENDAS.NONE; this.intentIcon = null; return; }
+        const dx = mouse.x - this.x;
+
+        if (this.agendaPhase === 0) {
+          this.state = 'walking';
+          this.facing = dx >= 0 ? 1 : -1;
+          this.vx = this.facing * 1.5;
+          if (Math.hypot(dx, mouse.y - this.y) < 55) {
+            this.agendaPhase = 1;
+            this.state = 'belly_trap';
+            this.vx = 0;
+            this.stateTimer = 180;
+            this.bellyTrapPatience = 80;
+            this.purrLevel = 0.5;
+            soundEngine.startPurr();
+            this.speak('免费摸肚皮碰瓷中…不来摸一下吗？💖');
+          }
+        } else if (this.agendaPhase === 1) {
+          this.state = 'belly_trap';
+          this.vx = 0;
+          if (this.stateTimer <= 0) {
+            this.speak('居然没上钩？这届两脚兽真冷漠！😼');
+            this.currentAgenda = AGENDAS.NONE;
+            this.intentIcon = null;
+            this.state = 'idle';
+            this.stateTimer = 60;
+          }
+        }
+      } else if (this.currentAgenda === AGENDAS.SUNBEAM_PILGRIM) {
+        const sun = sceneContext.sunbeam;
+        if (!sun) { this.currentAgenda = AGENDAS.NONE; this.intentIcon = null; return; }
+        const dx = sun.x - this.x;
+        if (this.agendaPhase === 0) {
+          this.state = 'walking';
+          this.facing = dx >= 0 ? 1 : -1;
+          this.vx = this.facing * 1.2;
+          if (Math.abs(dx) < sun.width * 0.35) {
+            this.agendaPhase = 1;
+            this.vx = 0;
+            this.state = 'sleeping';
+            this.stateTimer = 350;
+            this.speak('追着阳光暖洋洋…骨头都酥了~ ☀️💤');
+            if (sceneContext.spawnParticle) sceneContext.spawnParticle(this.x, this.y - 20, '☀️✨');
+            this.currentAgenda = AGENDAS.NONE;
+            this.intentIcon = null;
+          }
+        }
+      } else if (this.currentAgenda === AGENDAS.PARKOUR_CIRCUIT) {
+        if (this.agendaPhase === 0) {
+          // 战术冲刺起跑
+          this.state = 'zoomies';
+          this.vx = this.facing * 10.5;
+          this.vy = -6.5;
+          this.agendaPhase = 1;
+          this.stateTimer = 120;
+          if (sceneContext.spawnParticle) sceneContext.spawnParticle(this.x, this.y - 20, '⚡💨');
+        } else if (this.agendaPhase === 1) {
+          this.state = 'zoomies';
+          if (this.stateTimer <= 0) {
+            // 战术侧滑急停
+            this.vx = 0;
+            this.state = 'idle';
+            this.stateTimer = 70;
+            this.speak('战术演习完毕，我很冷静。⚡✨');
+            this.currentAgenda = AGENDAS.NONE;
+            this.intentIcon = null;
+          }
         }
       }
+    }
+
+    // 王座争夺决胜裁定
+    resolveThroneChallenge(sceneContext) {
+      if (!this.rival) return;
+      soundEngine.playSlap();
+      if (soundEngine.playHiss) soundEngine.playHiss();
+
+      const winner = this;
+      const loser = this.rival;
+
+      loser.perchedTier = null;
+      loser.vy = -4.5;
+      loser.vx = (loser.x > winner.x ? 1 : -1) * 5;
+      loser.state = 'idle';
+      loser.speak('切！本喵才不稀罕这个破台子！🙀');
+
+      winner.speak('王座易主！朕才是唯一的霸主！👑✨');
+      if (sceneContext && sceneContext.spawnParticle) {
+        sceneContext.spawnParticle((winner.x + loser.x) / 2, winner.y - 20, '💥👑');
+      }
+      this.rival = null;
     }
 
     // 传感器评估 (融入性格敏感度)
@@ -803,6 +1321,30 @@
 
     // 接收玩家抚摸
     pet(sceneContext) {
+      // 心机碰瓷肚皮陷阱响应：前几次抚摸爽，摸超时直接施展爱情咬咬暴击！
+      if (this.state === 'belly_trap') {
+        this.bellyTrapPatience -= 25;
+        this.purrLevel = Math.min(1.0, this.purrLevel + 0.25);
+        soundEngine.startPurr();
+        if (sceneContext && sceneContext.spawnParticle) {
+          sceneContext.spawnParticle(this.x + (Math.random() - 0.5) * 15, this.y - 15, '💖');
+        }
+        if (this.bellyTrapPatience <= 0) {
+          soundEngine.playHiss();
+          soundEngine.playSlap();
+          this.vy = -6.5;
+          this.vx = -this.facing * 6.5;
+          this.speak('嗷呜！摸肚皮超时！心机咬咬暴击！😈💥');
+          if (sceneContext && sceneContext.spawnParticle) {
+            sceneContext.spawnParticle(this.x, this.y - 20, '🐾💢');
+          }
+          this.state = 'idle';
+          this.currentAgenda = AGENDAS.NONE;
+          this.intentIcon = null;
+          return;
+        }
+      }
+
       this.overstimulation += 6;
       if (this.overstimulation > 65) {
         // 抚摸过载！飞机耳轻咬警告
@@ -905,6 +1447,94 @@
           ctx.ellipse(0, 8, this.radius * 1.1, this.radius * 0.75, 0, 0, Math.PI * 2);
           ctx.fillStyle = this.breed.bodyColor;
           ctx.fill();
+        } else if (this.state === 'stealth_stalk' || this.state === 'stealth_freeze') {
+          // 战术匍匐潜行形态 (Stealth Crawl / Freeze) - 身体扁平，底盘紧贴地面
+          ctx.scale(1.22, 0.65);
+          ctx.beginPath();
+          ctx.ellipse(0, 10, this.radius * 1.15, this.radius * 0.7, 0, 0, Math.PI * 2);
+          ctx.fillStyle = this.breed.bodyColor;
+          ctx.fill();
+
+          // 肚皮
+          ctx.beginPath();
+          ctx.ellipse(this.facing * 4, 12, this.radius * 0.65, this.radius * 0.45, 0, 0, Math.PI * 2);
+          ctx.fillStyle = this.breed.bellyColor;
+          ctx.fill();
+
+          // 匍匐小碎步爪子
+          const crawlStep = this.state === 'stealth_freeze' ? 0 : Math.sin(Date.now() * 0.02) * 3;
+          ctx.fillStyle = this.breed.bodyColor;
+          ctx.beginPath();
+          ctx.ellipse(this.facing * 14 + crawlStep, 16, 5, 3, 0, 0, Math.PI * 2);
+          ctx.ellipse(-this.facing * 14 - crawlStep, 16, 5, 3, 0, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (this.state === 'belly_trap') {
+          // 侧躺翻肚皮心机形态 (Belly Trap)
+          ctx.rotate(0.38 * this.facing);
+          ctx.beginPath();
+          ctx.ellipse(0, 6, this.radius * 1.12, this.radius * 0.9, 0, 0, Math.PI * 2);
+          ctx.fillStyle = this.breed.bodyColor;
+          ctx.fill();
+
+          // 大面积柔软肚皮毛
+          ctx.beginPath();
+          ctx.ellipse(0, 2, this.radius * 0.78, this.radius * 0.68, 0, 0, Math.PI * 2);
+          ctx.fillStyle = this.breed.bellyColor;
+          ctx.fill();
+
+          // 四只粉红肉垫小爪蜷缩悬空
+          ctx.fillStyle = this.breed.bodyColor;
+          for (let pi = -1; pi <= 1; pi += 0.66) {
+            ctx.beginPath();
+            ctx.arc(pi * 12, -8 + Math.sin(Date.now() * 0.006 + pi) * 1.5, 4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        } else if (this.state === 'wet_shake') {
+          // 湿爪嫌弃高频甩水形态
+          ctx.translate(0, 3);
+          ctx.beginPath();
+          ctx.ellipse(0, 4, this.radius, this.radius * 0.85, 0, 0, Math.PI * 2);
+          ctx.fillStyle = this.breed.bodyColor;
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.ellipse(this.facing * 4, 7, this.radius * 0.55, this.radius * 0.52, 0, 0, Math.PI * 2);
+          ctx.fillStyle = this.breed.bellyColor;
+          ctx.fill();
+
+          // 悬空快速甩动的前爪
+          const shakeOffset = Math.sin(Date.now() * 0.06) * 5;
+          ctx.fillStyle = this.breed.bodyColor;
+          ctx.beginPath();
+          ctx.ellipse(this.facing * 14, this.radius - 2 + shakeOffset, 5, 4, 0.3, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (this.state === 'feeder_hack') {
+          // 敲碗站立前拍形态
+          ctx.scale(0.92, 1.12);
+          ctx.beginPath();
+          ctx.ellipse(0, 4, this.radius, this.radius * 0.85, 0, 0, Math.PI * 2);
+          ctx.fillStyle = this.breed.bodyColor;
+          ctx.fill();
+
+          // 伸出前爪拍击
+          const tapOffset = Math.sin(Date.now() * 0.04) * 6;
+          ctx.fillStyle = this.breed.bodyColor;
+          ctx.beginPath();
+          ctx.ellipse(this.facing * (15 + tapOffset), this.radius - 4, 6, 4, 0, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (this.state === 'throne_challenge') {
+          // 炸毛弓背对决形态
+          ctx.scale(1.15, 1.12);
+          ctx.beginPath();
+          ctx.ellipse(0, 2, this.radius, this.radius * 0.9, 0, 0, Math.PI * 2);
+          ctx.fillStyle = this.breed.bodyColor;
+          ctx.fill();
+        } else if (this.state === 'judging_overlook') {
+          // 俯瞰审视高台形态
+          ctx.beginPath();
+          ctx.roundRect(-this.radius * 1.05, 0, this.radius * 2.1, this.radius * 1.1, [12]);
+          ctx.fillStyle = this.breed.bodyColor;
+          ctx.fill();
         } else {
           // 标准步态与踩奶肉爪
           const legPhase = Math.sin(this.walkCycle);
@@ -952,8 +1582,10 @@
       ctx.rotate(this.headTilt);
       ctx.translate(0, -headY);
 
-      // 耳朵 (飞机耳检测：过载或烦躁时耳朵后压)
-      const earBackAngle = (this.overstimulation > 30 || this.laserFrustration > 50) ? 0.35 : 0;
+      // 耳朵 (飞机耳检测：过载、烦躁、王座对峙或潜行时耳朵后压)
+      let earBackAngle = (this.overstimulation > 30 || this.laserFrustration > 50) ? 0.35 : 0;
+      if (this.state === 'throne_challenge') earBackAngle = 0.55;
+      if (this.state === 'stealth_stalk' || this.state === 'stealth_freeze') earBackAngle = 0.28;
       ctx.fillStyle = this.breed.bodyColor;
       // 左耳
       ctx.beginPath();
@@ -1009,7 +1641,19 @@
       const eyeLeftX = -headR * 0.4 + eyeOffset;
       const eyeRightX = headR * 0.4 + eyeOffset;
 
-      if (this.state === 'sleeping' || this.purrLevel > 0.6 || this.isBlinking) {
+      if (this.state === 'judging_overlook') {
+        // 居高临下蔑视审视眼 (冷漠细横线 - -)
+        ctx.strokeStyle = '#2c3e50';
+        ctx.lineWidth = 2.8;
+        ctx.beginPath();
+        ctx.moveTo(eyeLeftX - 4.5, eyeY);
+        ctx.lineTo(eyeLeftX + 4.5, eyeY);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(eyeRightX - 4.5, eyeY);
+        ctx.lineTo(eyeRightX + 4.5, eyeY);
+        ctx.stroke();
+      } else if (this.state === 'sleeping' || this.purrLevel > 0.6 || this.isBlinking) {
         // 开心眯眯眼 ^ ^
         ctx.strokeStyle = '#2c3e50';
         ctx.lineWidth = 2.5;
@@ -1092,6 +1736,9 @@
       // 喵语同传气泡
       if (this.bubbleTimer > 0 && this.bubbleText) {
         this.drawSpeechBubble(ctx, headY - headR - 24);
+      } else if (this.intentIcon && this.currentAgenda && this.currentAgenda !== AGENDAS.NONE) {
+        // 战术意图气泡徽章 (在无喵语气泡时常驻指示当前猫生大计)
+        this.drawIntentBadge(ctx, headY - headR - 14);
       }
 
       ctx.restore();
@@ -1100,6 +1747,36 @@
     speak(text) {
       this.bubbleText = text;
       this.bubbleTimer = 160;
+    }
+
+    // 绘制猫生战术大计浮动徽章
+    drawIntentBadge(ctx, badgeY) {
+      ctx.save();
+      ctx.font = 'bold 9px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      const label = `${this.intentIcon} ${this.intentLabel || ''}`;
+      const metrics = ctx.measureText(label);
+      const bw = metrics.width + 12;
+      const bh = 17;
+      const bx = -bw / 2;
+      const by = badgeY - bh;
+
+      const pulse = Math.sin(Date.now() * 0.005 + (this.x % 10)) * 0.12 + 0.88;
+      ctx.globalAlpha = pulse;
+
+      // 半透明深色胶囊微光底框
+      ctx.fillStyle = 'rgba(26, 36, 43, 0.86)';
+      ctx.beginPath();
+      ctx.roundRect(bx, by, bw, bh, [7]);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      ctx.fillStyle = '#f1f2f6';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, 0, by + bh / 2 + 0.5);
+      ctx.restore();
     }
 
     drawSpeechBubble(ctx, bubbleBottomY) {
@@ -1192,6 +1869,7 @@
   }
 
   window.CyberMeow = window.CyberMeow || {};
+  window.CyberMeow.AGENDAS = AGENDAS;
   window.CyberMeow.BREEDS = BREEDS;
   window.CyberMeow.PERSONALITIES = PERSONALITIES;
   window.CyberMeow.HATS = HATS;

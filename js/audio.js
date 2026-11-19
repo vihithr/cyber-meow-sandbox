@@ -353,6 +353,63 @@
       osc.stop(now + 0.2);
     }
 
+    // --- 猫咪领地争夺低吼 (Low Territorial Growl) ---
+    playLowGrowl(pitchMod = 1.0) {
+      if (this.isMuted) return;
+      this.init();
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const filter = this.ctx.createBiquadFilter();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(140 * pitchMod, now);
+      osc.frequency.linearRampToValueAtTime(110 * pitchMod, now + 0.4);
+      osc.frequency.linearRampToValueAtTime(125 * pitchMod, now + 0.8);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(320, now);
+      filter.Q.value = 3.5;
+
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.18, now + 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now);
+      osc.stop(now + 0.9);
+    }
+
+    // --- 水花飞溅 / 湿爪甩动 (Water Splash) ---
+    playWaterSplash() {
+      if (this.isMuted) return;
+      this.init();
+      const now = this.ctx.currentTime;
+      const buffer = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * 0.12), this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (data.length * 0.3));
+      }
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(1600, now);
+      filter.frequency.exponentialRampToValueAtTime(900, now + 0.1);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.sfxGain);
+      noise.start(now);
+    }
+
     // --- 扫地机器人马达嗡嗡声 ---
     startRoomba() {
       if (this.isMuted || this.roombaOsc) return;

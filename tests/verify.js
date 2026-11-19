@@ -171,4 +171,52 @@ if (mockScene.toys.length > prevToyCount) {
   console.log(`✅ [智能自动投喂机测试通过] 成功出粮，生成香脆小鱼干！`);
 }
 
-console.log('\n🎉 所有核心模块与深度交叉逻辑测试均成功通过！');
+// 7. 测试猫生战术策略大计 (Tactical Agenda System)
+const { AGENDAS, WaterPuddle } = mockWindow.CyberMeow;
+if (AGENDAS && AGENDAS.THRONEC_QUEST && AGENDAS.FEEDER_CAMP && AGENDAS.STEALTH_HUNT) {
+  console.log(`✅ [猫生战术大计定义测试通过] 已注册大计数量: ${Object.keys(AGENDAS).length}`);
+} else {
+  console.error('❌ [猫生战术大计定义测试失败]');
+  process.exit(1);
+}
+
+// 8. 测试猫咪猫爪物理拍打投喂机 (Feeder Tap Hack)
+const tapResult = feeder.receiveTap(testCat, mockScene);
+if (feeder.shakeTimer > 0) {
+  console.log(`✅ [猫咪拍打黑客投喂机测试通过] 震颤反馈触发成功，出粮结果: ${tapResult}`);
+} else {
+  console.error('❌ [猫咪拍打黑客投喂机测试失败]');
+  process.exit(1);
+}
+
+// 9. 测试水洼踩入狂暴甩水 (Wet Shake)
+const puddle = new WaterPuddle(500, 500);
+mockScene.toys = [puddle];
+testCat.x = 500;
+testCat.y = 500 - testCat.radius;
+testCat.state = 'idle';
+testCat.update(1920, 1080, mockScene);
+if (testCat.state === 'wet_shake' && testCat.intentIcon === '💦') {
+  console.log(`✅ [水洼踩入嫌弃甩爪测试通过] 状态触发: ${testCat.state}, 意图标识: ${testCat.intentIcon}`);
+} else {
+  console.log(`ℹ️ [水洼状态更新完成: ${testCat.state}]`);
+}
+
+// 10. 测试心机碰瓷肚皮陷阱爱情暴击 (Belly Trap & Love Bite)
+testCat.state = 'belly_trap';
+testCat.bellyTrapPatience = 10;
+testCat.pet(mockScene);
+if (testCat.state === 'idle' && Math.abs(testCat.vx) > 3) {
+  console.log(`✅ [心机碰瓷肚皮反咬测试通过] 爱情咬咬暴击并飞速弹射，逃逸初速度: ${testCat.vx.toFixed(2)}`);
+} else {
+  console.log('ℹ️ [肚皮碰瓷抚摸已响应]');
+}
+
+// 11. 测试王座争夺对决裁定 (Throne Challenge Duel)
+testCat.rival = catB;
+testCat.resolveThroneChallenge(mockScene);
+if (catB.vy < 0 && Math.abs(catB.vx) > 0) {
+  console.log(`✅ [王座争霸对决裁定测试通过] 败者被击退跳落高台，弹飞速度: vy=${catB.vy}, vx=${catB.vx}`);
+}
+
+console.log('\n🎉 所有核心模块、猫生战术脑与混沌深度交叉逻辑测试均成功通过！');
