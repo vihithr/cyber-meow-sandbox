@@ -768,3 +768,256 @@ canvas#playground {
   border-radius: 10px;
   background: #141520;
 }
+
+/* ============================================================================
+   底层绘制引擎与聚类折叠调控中心 (Render Engine Tuner & Telemetry)
+   ============================================================================ */
+.tuner-card {
+  width: 640px;
+  max-width: 92vw;
+  max-height: 84vh;
+  background: radial-gradient(circle at top left, #1e2235 0%, #11131c 100%);
+  border: 1px solid rgba(72, 219, 251, 0.3);
+  border-radius: 20px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7), 0 0 24px rgba(72, 219, 251, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 20px 24px;
+  transform: scale(0.95);
+  transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.modal-overlay.open .tuner-card {
+  transform: scale(1);
+}
+
+.tuner-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 12px;
+}
+
+.tuner-header h3 {
+  font-size: 1.15rem;
+  color: #48dbfb;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tuner-body {
+  overflow-y: auto;
+  padding-right: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tuner-section {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+
+.tuner-section-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #dfe4ea;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 预设卡片组 */
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.preset-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 10px 8px;
+  color: #ced6e0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  transition: all 0.2s;
+}
+
+.preset-btn b {
+  font-size: 0.84rem;
+  color: #f1f2f6;
+}
+
+.preset-btn span {
+  font-size: 0.68rem;
+  color: #a4b0be;
+  line-height: 1.3;
+}
+
+.preset-btn:hover {
+  background: rgba(72, 219, 251, 0.1);
+  border-color: rgba(72, 219, 251, 0.4);
+}
+
+.preset-btn.active {
+  background: rgba(72, 219, 251, 0.18);
+  border-color: #48dbfb;
+  box-shadow: 0 0 14px rgba(72, 219, 251, 0.25);
+}
+
+.preset-btn.active b {
+  color: #48dbfb;
+}
+
+/* 行控组件 */
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.84rem;
+}
+
+.control-label {
+  color: #a4b0be;
+  min-width: 90px;
+}
+
+.control-tip {
+  font-size: 0.74rem;
+  color: #747d8c;
+}
+
+.toggle-group {
+  display: flex;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  padding: 3px;
+  gap: 4px;
+}
+
+.tuner-opt-btn {
+  background: transparent;
+  border: none;
+  border-radius: 16px;
+  padding: 4px 12px;
+  font-size: 0.78rem;
+  color: #a4b0be;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tuner-opt-btn:hover {
+  color: #fff;
+}
+
+.tuner-opt-btn.active {
+  background: #48dbfb;
+  color: #11131c;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(72, 219, 251, 0.4);
+}
+
+/* 现代开关滑块 Switch */
+.switch-toggle {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.switch-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(255, 255, 255, 0.18);
+  transition: .3s;
+  border-radius: 20px;
+}
+
+.switch-slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .3s;
+  border-radius: 50%;
+}
+
+input:checked + .switch-slider {
+  background-color: #1dd1a1;
+}
+
+input:checked + .switch-slider:before {
+  transform: translateX(18px);
+}
+
+/* 实时遥测网格 */
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.telemetry-item {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.telemetry-item span {
+  font-size: 0.72rem;
+  color: #747d8c;
+}
+
+.telemetry-item b {
+  font-size: 0.95rem;
+  color: #2ed573;
+  font-family: monospace;
+}
+
+/* 主屏幕微型遥测 HUD */
+#telemetry-hud {
+  position: fixed;
+  top: 60px;
+  right: 18px;
+  z-index: 19;
+  background: rgba(15, 17, 26, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(72, 219, 251, 0.3);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 0.76rem;
+  color: #48dbfb;
+  font-family: monospace;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}

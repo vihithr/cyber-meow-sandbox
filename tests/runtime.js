@@ -814,6 +814,57 @@ function registerRuntimeTests(options) {
       assert.ok(Math.abs(t.b) < 0.01, `爬树文字随躯干倾斜: b=${t.b}`);
     });
   });
+
+  test('空间连通分量聚类与多猫标签折叠引擎', () => {
+    const engine = sandbox.CyberMeow.LabelClusterEngine;
+    assert.ok(engine, '缺少 LabelClusterEngine 挂载');
+
+    const Cat = sandbox.CyberMeow.Cat;
+    const BREEDS = sandbox.CyberMeow.BREEDS;
+
+    // 3 只扎堆猫咪 (水平距离 < 75px)
+    const catA = new Cat(500, 400, { breed: BREEDS[0] });
+    const catB = new Cat(530, 410, { breed: BREEDS[1] });
+    const catC = new Cat(560, 405, { breed: BREEDS[2] });
+    // 1 只落单猫咪 (远距离 1200px)
+    const catD = new Cat(1200, 400, { breed: BREEDS[3] });
+
+    const viewport = { cameraX: 0, zoom: 1.0, width: 1920, height: 1080 };
+    const { clusters, singletons } = engine.clusterCats([catA, catB, catC, catD], viewport, 75);
+
+    assert.strictEqual(clusters.length, 1, '扎堆猫咪未正确聚类为 1 个团簇');
+    assert.strictEqual(clusters[0].count, 3, '聚类团簇内猫咪数量应为 3');
+    assert.strictEqual(singletons.length, 1, '落单猫咪应作为 1 个独立项');
+    assert.strictEqual(singletons[0], catD);
+
+    // 测试智能聚类渲染无异常
+    const ctx = mock.document.createElement('canvas').getContext('2d');
+    assert.doesNotThrow(() => {
+      engine.renderLabels(ctx, [catA, catB, catC, catD], viewport, { clusterMode: 'smart' });
+      engine.renderLabels(ctx, [catA, catB, catC, catD], viewport, { clusterMode: 'minimal' });
+      engine.renderLabels(ctx, [catA, catB, catC, catD], viewport, { clusterMode: 'full' });
+    }, 'LabelClusterEngine 渲染多模式抛异常');
+  });
+
+  test('底层绘制引擎调控中枢与预设切换', () => {
+    const mgr = sandbox.CyberMeow.renderEngineManager;
+    assert.ok(mgr, '缺少 renderEngineManager 挂载');
+
+    mgr.applyPreset('saver');
+    assert.strictEqual(mgr.config.pipeline, 'chibi_cached', '节能预设管线异常');
+    assert.strictEqual(mgr.config.clusterMode, 'minimal', '节能预设折叠异常');
+    assert.strictEqual(mgr.config.particleBudget, 30, '节能预设粒子异常');
+
+    mgr.applyPreset('ultra');
+    assert.strictEqual(mgr.config.pipeline, 'procedural', '次世代预设管线异常');
+    assert.strictEqual(mgr.config.clusterMode, 'full', '次世代预设折叠异常');
+    assert.strictEqual(mgr.config.particleBudget, 240, '次世代预设粒子异常');
+
+    mgr.applyPreset('balanced');
+    assert.strictEqual(mgr.config.pipeline, 'chibi', '平衡预设管线异常');
+    assert.strictEqual(mgr.config.clusterMode, 'smart', '平衡预设折叠异常');
+    assert.strictEqual(mgr.config.spriteCache, true, '平衡预设 Sprite 缓存应开启');
+  });
 }
 
 module.exports = { registerRuntimeTests };

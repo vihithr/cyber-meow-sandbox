@@ -87,6 +87,18 @@
 
       // 猫咪渲染模式：'chibi' (Q萌团子，默认常态极速) | 'procedural' (次世代高精拟真)
       this.catRenderStyle = 'chibi';
+      // 底层绘制引擎配置与遥测中枢
+      this.renderEngineConfig = (window.CyberMeow && window.CyberMeow.renderEngineManager)
+        ? window.CyberMeow.renderEngineManager.config
+        : {
+            pipeline: 'chibi',
+            clusterMode: 'smart',
+            clusterLabels: true,
+            spriteCache: true,
+            eyeTracking: true,
+            particleBudget: 100,
+            showTelemetry: false
+          };
 
       // 建造与放置模式系统 (Placement Engine)
       this.placement = {
@@ -243,6 +255,9 @@
 
     toggleCatLOD() {
       this.catRenderStyle = this.catRenderStyle === 'chibi' ? 'procedural' : 'chibi';
+      if (this.renderEngineConfig) {
+        this.renderEngineConfig.pipeline = this.catRenderStyle;
+      }
       const lodBtn = document.getElementById('btn-cat-lod');
       const isChibi = this.catRenderStyle === 'chibi';
       if (lodBtn) {
@@ -250,6 +265,40 @@
         lodBtn.style.color = isChibi ? '#feca57' : '#1dd1a1';
       }
       uiManager.showToast(isChibi ? '🐱 已切换至「Q萌团子」极速渲染模式（60FPS 极佳流畅度）~' : '🐱 已切换至「次世代高精拟真」解剖骨骼渲染模式~');
+      if (uiManager && uiManager.syncTunerUI) uiManager.syncTunerUI();
+    }
+
+    applyRenderPreset(preset) {
+      if (window.CyberMeow && window.CyberMeow.renderEngineManager) {
+        window.CyberMeow.renderEngineManager.applyPreset(preset);
+        this.renderEngineConfig = window.CyberMeow.renderEngineManager.config;
+      }
+      const pipe = this.renderEngineConfig.pipeline;
+      this.catRenderStyle = (pipe === 'procedural') ? 'procedural' : 'chibi';
+      const lodBtn = document.getElementById('btn-cat-lod');
+      if (lodBtn) {
+        lodBtn.innerText = this.catRenderStyle === 'chibi' ? '🐱 风格: Q萌团子' : '🐱 风格: 高精拟真';
+        lodBtn.style.color = this.catRenderStyle === 'chibi' ? '#feca57' : '#1dd1a1';
+      }
+      uiManager.showToast(`⚙️ 已应用预设：${preset === 'saver' ? '🔋 极致节能' : preset === 'ultra' ? '🧬 次世代高精' : '🐾 萌系平衡'}`);
+    }
+
+    setRenderPipeline(pipe) {
+      if (!this.renderEngineConfig) return;
+      this.renderEngineConfig.pipeline = pipe;
+      this.catRenderStyle = (pipe === 'procedural') ? 'procedural' : 'chibi';
+      const lodBtn = document.getElementById('btn-cat-lod');
+      if (lodBtn) {
+        lodBtn.innerText = this.catRenderStyle === 'chibi' ? '🐱 风格: Q萌团子' : '🐱 风格: 高精拟真';
+        lodBtn.style.color = this.catRenderStyle === 'chibi' ? '#feca57' : '#1dd1a1';
+      }
+      uiManager.showToast(`🎨 渲染管线已切换为: ${pipe === 'chibi_cached' ? '极速离屏烘焙' : pipe === 'procedural' ? '次世代骨骼拟真' : 'Q萌团子实时矢量'}`);
+    }
+
+    setClusterMode(mode) {
+      if (!this.renderEngineConfig) return;
+      this.renderEngineConfig.clusterMode = mode;
+      uiManager.showToast(`🏷️ 标签折叠策略已切换为: ${mode === 'smart' ? '智能聚类防重叠' : mode === 'minimal' ? '极简微标模式' : '经典全量展开'}`);
     }
 
     startPlacement(itemType) {
@@ -706,10 +755,18 @@
           }
         } else if (key === 't') {
           this.toggleCatLOD();
+        } else if (key === 'e') {
+          const tuner = document.getElementById('render-tuner-modal');
+          if (tuner && tuner.classList.contains('open')) {
+            uiManager.closeRenderTuner();
+          } else {
+            uiManager.openRenderTuner();
+          }
         } else if (e.code === 'Escape') {
           if (this.placement.active) this.cancelPlacement();
           uiManager.closeBuildCatalog();
           uiManager.closeCatPassport();
+          uiManager.closeRenderTuner();
         } else if (key === '1') this.setTool('pet');
         else if (key === '2') this.setTool('cat');
         else if (key === '3') this.setTool('laser');
@@ -1270,13 +1327,45 @@
       if (this.toys.length > MAX_TOYS) this.toys.splice(0, this.toys.length - MAX_TOYS);
       if (this.furniture.length > MAX_FURNITURE) this.furniture.splice(0, this.furniture.length - MAX_FURNITURE);
 
-      // 6. 猫咪更新与绘制 (支持 LOD 双模：常态 Q 萌团子 / 次世代高精拟真)
-      // 取舍：猫的 update 负责吃鱼 splice / 骑行 / 附着状态，全部执行；被拖拽的猫强制绘制。
+      // 6. 猫咪更新与绘制 (支持离屏 Sprite 缓存烘焙与双模 LOD)
+      const renderMgr = window.CyberMeow && window.CyberMeow.renderEngineManager;
+      const cfg = this.renderEngineConfig || (renderMgr ? renderMgr.config : null) || {};
+      const pipe = cfg.pipeline || this.catRenderStyle || 'chibi';
+      const actualStyle = (pipe === 'procedural') ? 'procedural' : 'chibi';
+      this.catRenderStyle = actualStyle;
+
+      const useSpriteCache = (cfg.spriteCache !== false) && (pipe === 'chibi_cached' || pipe === 'chibi');
+      const eyeTracking = (cfg.eyeTracking !== false);
+      const clusterLabels = (cfg.clusterLabels !== false);
+
+      let visibleCatsCount = 0;
       for (let c of this.cats) {
         c.update(worldWidth, height, this);
         if (c === this.mouse.draggedCat || this._isVisibleX(c.x, (c.radius || 22) + 40)) {
-          c.draw(ctx, worldWidth, height, { style: this.catRenderStyle });
+          visibleCatsCount++;
+          c.draw(ctx, worldWidth, height, {
+            style: this.catRenderStyle,
+            suppressIndividualLabels: clusterLabels,
+            useSpriteCache: useSpriteCache,
+            eyeTracking: eyeTracking
+          });
         }
+      }
+
+      // 6.5. 空间聚类与标签分级折叠渲染 (LabelClusterEngine)
+      // 在猫咪身躯之后统一绘制聚类胶囊与抗遮挡名牌，解决文字重叠光污染
+      if (clusterLabels && window.CyberMeow && window.CyberMeow.LabelClusterEngine) {
+        const viewport = {
+          cameraX: this.cameraX,
+          zoom: this.zoom,
+          width: this.viewportWidth,
+          height: this.viewportHeight
+        };
+        const mouseWorld = this.getWorldPos ? this.getWorldPos(this.mouse.x, this.mouse.y) : null;
+        window.CyberMeow.LabelClusterEngine.renderLabels(ctx, this.cats, viewport, {
+          clusterMode: cfg.clusterMode || 'smart',
+          catCam: this.catCam
+        }, mouseWorld);
       }
 
       // 7. 放置模式建造虚影预览
@@ -1334,7 +1423,47 @@
       // 11. 豪宅全景导航小地图雷达绘制 (屏幕坐标系，不随相机缩放)
       this.renderMiniMap();
 
+      // 12. 引擎遥测数据统计与 UI 刷新
+      this.updateTelemetryStats(visibleCatsCount);
+
       requestAnimationFrame(this.loop);
+    }
+
+    updateTelemetryStats(visibleCatsCount) {
+      this._telemetryTick = (this._telemetryTick || 0) + 1;
+      if (this._telemetryTick % 12 !== 0) return;
+
+      const clusterEngine = window.CyberMeow && window.CyberMeow.LabelClusterEngine;
+      const clusterCount = clusterEngine ? (clusterEngine.clusters?.length || 0) : 0;
+      const culled = Math.max(0, this.cats.length - visibleCatsCount);
+
+      const fps = Math.round(1000 / Math.max(1, this._frameEma || 16.7));
+      const ms = (this._frameEma || 16.7).toFixed(1);
+
+      // 同步模态框内数据
+      const elFps = document.getElementById('tuner-fps');
+      if (elFps) elFps.innerText = `${fps} FPS`;
+      const elMs = document.getElementById('tuner-ms');
+      if (elMs) elMs.innerText = `${ms} ms`;
+      const elClusters = document.getElementById('tuner-clusters');
+      if (elClusters) elClusters.innerText = `${clusterCount} 个`;
+      const elVis = document.getElementById('tuner-visible-cats');
+      if (elVis) elVis.innerText = `${visibleCatsCount} 只`;
+      const elCulled = document.getElementById('tuner-culled');
+      if (elCulled) elCulled.innerText = `${culled}`;
+
+      // 同步常驻悬浮 HUD
+      const hud = document.getElementById('telemetry-hud');
+      if (hud && hud.style.display !== 'none') {
+        const hudFps = document.getElementById('telem-hud-fps');
+        if (hudFps) hudFps.innerText = `${fps} FPS`;
+        const hudMs = document.getElementById('telem-hud-ms');
+        if (hudMs) hudMs.innerText = `${ms}ms`;
+        const hudCats = document.getElementById('telem-hud-cats');
+        if (hudCats) hudCats.innerText = `🐾 ${visibleCatsCount}/${this.cats.length}`;
+        const hudCl = document.getElementById('telem-hud-cluster');
+        if (hudCl) hudCl.innerText = `📦 ${clusterCount}簇`;
+      }
     }
 
     bindMiniMap() {

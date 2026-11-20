@@ -52,6 +52,7 @@
       this.bindSnapshotEvents();
       this.bindStudioEvents();
       this.bindCatalogEvents();
+      this.bindRenderTunerEvents();
     }
 
     // --- 建造与摆放仓库系统 (Build Catalog) ---
@@ -138,6 +139,127 @@
         lodBtn.onclick = () => {
           const app = window.CyberMeow.app;
           if (app && app.toggleCatLOD) app.toggleCatLOD();
+        };
+      }
+    }
+
+    // --- 底层绘制引擎与标签折叠调控中心 (Render Engine Tuner) ---
+    openRenderTuner() {
+      const modal = document.getElementById('render-tuner-modal');
+      if (!modal) return;
+      this.syncTunerUI();
+      modal.classList.add('open');
+      if (soundEngine?.playPop) soundEngine.playPop();
+    }
+
+    closeRenderTuner() {
+      const modal = document.getElementById('render-tuner-modal');
+      if (modal) modal.classList.remove('open');
+    }
+
+    syncTunerUI() {
+      const app = window.CyberMeow.app;
+      if (!app || !app.renderEngineConfig) return;
+      const cfg = app.renderEngineConfig;
+
+      // 管线按钮状态
+      document.querySelectorAll('#tuner-pipeline-group .tuner-opt-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.val === cfg.pipeline);
+      });
+
+      // 聚类折叠策略按钮状态
+      document.querySelectorAll('#tuner-cluster-group .tuner-opt-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.val === cfg.clusterMode);
+      });
+
+      // 复选框
+      const chkSprite = document.getElementById('chk-sprite-cache');
+      if (chkSprite) chkSprite.checked = !!cfg.spriteCache;
+
+      const chkEye = document.getElementById('chk-eye-tracking');
+      if (chkEye) chkEye.checked = !!cfg.eyeTracking;
+
+      const chkTelem = document.getElementById('chk-show-telemetry');
+      if (chkTelem) chkTelem.checked = !!cfg.showTelemetry;
+    }
+
+    bindRenderTunerEvents() {
+      const openBtn = document.getElementById('btn-render-tuner');
+      if (openBtn) openBtn.onclick = () => this.openRenderTuner();
+
+      const closeBtn = document.getElementById('btn-close-tuner');
+      if (closeBtn) closeBtn.onclick = () => this.closeRenderTuner();
+
+      // 预设点击
+      document.querySelectorAll('.preset-btn').forEach(btn => {
+        btn.onclick = () => {
+          const preset = btn.dataset.preset;
+          const app = window.CyberMeow.app;
+          if (app && app.applyRenderPreset) {
+            app.applyRenderPreset(preset);
+            document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            this.syncTunerUI();
+          }
+        };
+      });
+
+      // 管线模式切换
+      document.querySelectorAll('#tuner-pipeline-group .tuner-opt-btn').forEach(btn => {
+        btn.onclick = () => {
+          const val = btn.dataset.val;
+          const app = window.CyberMeow.app;
+          if (app && app.setRenderPipeline) {
+            app.setRenderPipeline(val);
+            this.syncTunerUI();
+          }
+        };
+      });
+
+      // 聚类折叠策略切换
+      document.querySelectorAll('#tuner-cluster-group .tuner-opt-btn').forEach(btn => {
+        btn.onclick = () => {
+          const val = btn.dataset.val;
+          const app = window.CyberMeow.app;
+          if (app && app.setClusterMode) {
+            app.setClusterMode(val);
+            this.syncTunerUI();
+          }
+        };
+      });
+
+      // 开关勾选
+      const chkSprite = document.getElementById('chk-sprite-cache');
+      if (chkSprite) {
+        chkSprite.onchange = (e) => {
+          const app = window.CyberMeow.app;
+          if (app && app.renderEngineConfig) {
+            app.renderEngineConfig.spriteCache = e.target.checked;
+            this.showToast(e.target.checked ? '⚡ 已开启离屏 Sprite 身体缓存 (加速 300%)' : '🎨 已切换至纯原生实时矢量绘制');
+          }
+        };
+      }
+
+      const chkEye = document.getElementById('chk-eye-tracking');
+      if (chkEye) {
+        chkEye.onchange = (e) => {
+          const app = window.CyberMeow.app;
+          if (app && app.renderEngineConfig) {
+            app.renderEngineConfig.eyeTracking = e.target.checked;
+            this.showToast(e.target.checked ? '👀 已开启灵动立体双眼视线追踪' : '👀 灵动双眼视线追踪已关闭');
+          }
+        };
+      }
+
+      const chkTelem = document.getElementById('chk-show-telemetry');
+      if (chkTelem) {
+        chkTelem.onchange = (e) => {
+          const app = window.CyberMeow.app;
+          if (app && app.renderEngineConfig) {
+            app.renderEngineConfig.showTelemetry = e.target.checked;
+            const hud = document.getElementById('telemetry-hud');
+            if (hud) hud.style.display = e.target.checked ? 'block' : 'none';
+          }
         };
       }
     }
@@ -984,6 +1106,298 @@
     }
   }
 
+  // ============================================================================
+  // 空间聚类与标签分级折叠引擎 (Spatial Clustering & Label Folding Engine)
+  // 基于双边界原理 (Dual-Boundary)，解决多猫沙盒信息过载与文字碰撞光污染
+  // ============================================================================
+  class LabelClusterEngine {
+    constructor() {
+      this.hoveredCluster = null;
+      this.clusters = [];
+    }
+
+    /**
+     * 对视口内的猫咪执行空间连通分量距离聚类
+     */
+    clusterCats(cats, viewport, threshold = 75) {
+      const visibleCats = [];
+      const { cameraX, zoom, width } = viewport;
+      const minX = cameraX - 80;
+      const maxX = cameraX + width / zoom + 80;
+
+      for (let c of cats) {
+        if (c.x >= minX && c.x <= maxX) {
+          visibleCats.push(c);
+        }
+      }
+
+      const n = visibleCats.length;
+      if (n === 0) {
+        this.clusters = [];
+        return { clusters: [], singletons: [] };
+      }
+
+      // 并查集
+      const parent = new Array(n);
+      for (let i = 0; i < n; i++) parent[i] = i;
+      const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+      const union = (i, j) => {
+        const rootI = find(i);
+        const rootJ = find(j);
+        if (rootI !== rootJ) parent[rootI] = rootJ;
+      };
+
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          const dx = Math.abs(visibleCats[i].x - visibleCats[j].x);
+          const dy = Math.abs(visibleCats[i].y - visibleCats[j].y);
+          if (dx < threshold && dy < threshold * 0.65) {
+            union(i, j);
+          }
+        }
+      }
+
+      const groups = new Map();
+      for (let i = 0; i < n; i++) {
+        const root = find(i);
+        if (!groups.has(root)) groups.set(root, []);
+        groups.get(root).push(visibleCats[i]);
+      }
+
+      const clusters = [];
+      const singletons = [];
+
+      for (let [root, members] of groups) {
+        if (members.length > 1) {
+          let sumX = 0;
+          let minY = Infinity;
+          members.forEach(m => {
+            sumX += m.x;
+            if (m.y < minY) minY = m.y;
+          });
+          clusters.push({
+            id: `cluster_${root}`,
+            cats: members,
+            cx: sumX / members.length,
+            cy: minY - 36,
+            count: members.length
+          });
+        } else {
+          singletons.push(members[0]);
+        }
+      }
+
+      this.clusters = clusters;
+      return { clusters, singletons };
+    }
+
+    /**
+     * 统一上层渲染管线：绘制聚类胶囊与折叠后的单猫标签
+     */
+    renderLabels(ctx, cats, viewport, config = {}, mouseWorld = null) {
+      const mode = config.clusterMode || 'smart'; // 'smart' | 'minimal' | 'full'
+      const { clusters, singletons } = this.clusterCats(cats, viewport);
+
+      ctx.save();
+
+      // 1. 渲染团簇折叠胶囊 (Cat Clump Capsule)
+      if (mode !== 'full') {
+        for (let cl of clusters) {
+          const isHovered = mouseWorld && Math.hypot(mouseWorld.x - cl.cx, mouseWorld.y - cl.cy) < 45;
+          this._drawClusterCapsule(ctx, cl, isHovered, mode);
+        }
+      }
+
+      // 2. 渲染单猫或全量展开标签 (带相邻 Y 轴防遮挡避让)
+      const targetCats = (mode === 'full') ? cats : singletons;
+      const sorted = [...targetCats].sort((a, b) => a.x - b.x);
+
+      for (let i = 0; i < sorted.length; i++) {
+        const cat = sorted[i];
+        let yOffset = 0;
+        if (i > 0 && Math.abs(cat.x - sorted[i - 1].x) < 48) {
+          yOffset = -14; // 相邻猫咪 Y 轴梯级错开避让
+        }
+
+        const isHovered = mouseWorld && Math.hypot(mouseWorld.x - cat.x, mouseWorld.y - (cat.y - 30)) < 36;
+        const isFocus = (cat.isGrabbed || isHovered || cat === config.catCam);
+
+        this._drawSingleCatLabel(ctx, cat, mode, isFocus, yOffset);
+      }
+
+      ctx.restore();
+    }
+
+    _drawClusterCapsule(ctx, cluster, isHovered, mode) {
+      const { cx, cy, cats, count } = cluster;
+      const names = cats.map(c => c.name).join('·');
+      const label = `🐾 ${count}猫贴贴: ${names}`;
+
+      ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      const textW = ctx.measureText(label).width;
+      const padX = 12;
+      const bw = textW + padX * 2;
+      const bh = 22;
+
+      ctx.save();
+      ctx.translate(cx, cy);
+
+      // 半透明磨砂胶囊底盘
+      ctx.fillStyle = isHovered ? 'rgba(255, 107, 129, 0.88)' : 'rgba(20, 24, 35, 0.72)';
+      ctx.strokeStyle = isHovered ? '#ff6b81' : 'rgba(255, 255, 255, 0.35)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(-bw / 2, -bh / 2, bw, bh, 11);
+      } else {
+        ctx.rect(-bw / 2, -bh / 2, bw, bh);
+      }
+      ctx.fill();
+      ctx.stroke();
+
+      // 文字
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, 0, 0);
+
+      // 若有猫咪正在说话，在胶囊上方显示最新合并气泡
+      const speakingCat = cats.find(c => c.bubbleTimer > 0 && c.bubbleText);
+      if (speakingCat) {
+        const bubble = `💬 ${speakingCat.name}: "${speakingCat.bubbleText}"`;
+        const bW = ctx.measureText(bubble).width + 16;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(-bW / 2, -bh / 2 - 24, bW, 18, 9);
+        } else {
+          ctx.rect(-bW / 2, -bh / 2 - 24, bW, 18);
+        }
+        ctx.fill();
+        ctx.fillStyle = '#1e272e';
+        ctx.fillText(bubble, 0, -bh / 2 - 15);
+      }
+
+      ctx.restore();
+    }
+
+    _drawSingleCatLabel(ctx, cat, mode, isFocus, yOffset = 0) {
+      const R = cat.radius || 22;
+      const topY = cat.y - R * 1.8 + yOffset;
+
+      ctx.save();
+      ctx.translate(cat.x, topY);
+
+      if (mode === 'minimal' && !isFocus) {
+        // 极简微标模式：常态仅显示微光点
+        ctx.fillStyle = (cat.purrLevel > 0) ? '#2ed573' : 'rgba(255, 255, 255, 0.45)';
+        ctx.beginPath();
+        ctx.arc(0, 0, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        return;
+      }
+
+      ctx.font = 'bold 10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      const nameW = ctx.measureText(cat.name).width;
+
+      if (isFocus) {
+        // 焦点态/悬停态：展开详细名牌与高亮光晕
+        const pillW = nameW + 28;
+        ctx.fillStyle = 'rgba(16, 20, 30, 0.85)';
+        ctx.strokeStyle = '#feca57';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(-pillW / 2, -16, pillW, 18, 9);
+        } else {
+          ctx.rect(-pillW / 2, -16, pillW, 18);
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`✨ ${cat.name}`, 0, -7);
+      } else {
+        // 常态紧凑微标
+        const pillW = nameW + 12;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(-pillW / 2, -14, pillW, 14, 7);
+        } else {
+          ctx.rect(-pillW / 2, -14, pillW, 14);
+        }
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(cat.name, 0, -7);
+      }
+
+      // 气泡与徽章
+      if (cat.bubbleTimer > 0 && cat.bubbleText) {
+        cat.drawSpeechBubble(ctx, -20);
+      } else if (cat.intentIcon && isFocus) {
+        cat.drawIntentBadge(ctx, -20);
+      }
+
+      ctx.restore();
+    }
+  }
+
+  // ============================================================================
+  // 底层绘制引擎调控中枢 (Render Engine Manager)
+  // ============================================================================
+  class RenderEngineManager {
+    constructor() {
+      this.config = {
+        pipeline: 'chibi',          // 'chibi' (Q萌) | 'chibi_cached' (极速Sprite) | 'procedural' (拟真)
+        clusterMode: 'smart',       // 'smart' (智能聚类折叠) | 'minimal' (极简) | 'full' (全开)
+        clusterLabels: true,        // 是否使用 LabelClusterEngine 做全局抗重叠渲染
+        spriteCache: true,          // 离屏 Sprite 缓存烘焙
+        eyeTracking: true,          // 灵动双眼视线追踪
+        particleBudget: 100,        // 粒子上限预算
+        showTelemetry: false        // 是否显示遥测浮窗
+      };
+      this.telemetry = {
+        fps: 60,
+        frameMs: 1.2,
+        activeClusters: 0,
+        visibleCats: 0,
+        cacheHitRate: '100%',
+        culledEntities: 0
+      };
+    }
+
+    applyPreset(presetName) {
+      if (presetName === 'saver') {
+        this.config.pipeline = 'chibi_cached';
+        this.config.clusterMode = 'minimal';
+        this.config.spriteCache = true;
+        this.config.eyeTracking = false;
+        this.config.particleBudget = 30;
+      } else if (presetName === 'ultra') {
+        this.config.pipeline = 'procedural';
+        this.config.clusterMode = 'full';
+        this.config.spriteCache = false;
+        this.config.eyeTracking = true;
+        this.config.particleBudget = 240;
+      } else { // balanced
+        this.config.pipeline = 'chibi';
+        this.config.clusterMode = 'smart';
+        this.config.spriteCache = true;
+        this.config.eyeTracking = true;
+        this.config.particleBudget = 100;
+      }
+    }
+  }
+
   window.CyberMeow = window.CyberMeow || {};
+  window.CyberMeow.LabelClusterEngine = new LabelClusterEngine();
+  window.CyberMeow.renderEngineManager = new RenderEngineManager();
   window.CyberMeow.uiManager = new UIManager();
 })(window);

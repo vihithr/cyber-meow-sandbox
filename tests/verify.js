@@ -664,6 +664,29 @@ test('凌晨暴走写满能量、弹射初速与狂飙意图', () => {
   assert.ok(cat.stateTimer >= 240, '暴走时长不足');
 });
 
+test('Q萌猫团子灵动立体双眼与白猫异瞳配置', () => {
+  const whiteBreed = BREEDS.find(b => b.id === 'white');
+  assert.ok(whiteBreed, '缺少白猫品种配置');
+  assert.ok(whiteBreed.eyeColor && whiteBreed.eyeRightColor, '白猫缺少异瞳配色支持');
+  assert.notStrictEqual(whiteBreed.eyeColor, whiteBreed.eyeRightColor, '白猫左右眼颜色应不同');
+
+  const cat = new Cat(300, 300, { breed: whiteBreed });
+  const mockCtx = {
+    save: noop, restore: noop, translate: noop, scale: noop, rotate: noop,
+    beginPath: noop, ellipse: noop, arc: noop, fill: noop, stroke: noop,
+    moveTo: noop, lineTo: noop, closePath: noop, quadraticCurveTo: noop,
+    fillText: noop, measureText: () => ({ width: 40 }), getTransform: () => ({ a: 1 }),
+    setTransform: noop
+  };
+
+  ['idle', 'sleeping', 'loaf', 'grabbed', 'bridge_duel'].forEach(st => {
+    cat.state = st;
+    assert.doesNotThrow(() => {
+      cat.renderChibiLoaf(mockCtx, 1920, 1080, { eyeTracking: true });
+    }, `Q萌猫团子在状态 ${st} 灵动双眼渲染抛异常`);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 6. 运行时 + 性能/统计型测试（environment / ui / app 在 VM 中真实执行）
 // ---------------------------------------------------------------------------

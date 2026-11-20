@@ -40,6 +40,7 @@
       <div class="glass-card" style="padding: 6px 12px; gap: 8px;">
         <button class="pill-btn" id="btn-build-catalog" title="打开建造与摆放仓库 (快捷键: B)" style="background: linear-gradient(135deg, #10ac84 0%, #1dd1a1 100%); color: #fff; font-weight: bold;">🔨 建造仓库 (B)</button>
         <button class="pill-btn" id="btn-cat-lod" title="切换猫咪渲染模式：Q萌团子 / 高精拟真 (快捷键: T)">🐱 风格: Q萌团子</button>
+        <button class="pill-btn" id="btn-render-tuner" title="打开底层绘制引擎与聚类折叠调控中心 (快捷键: E)" style="color: #48dbfb; font-weight: bold;">⚙️ 引擎调节 (E)</button>
         <button class="pill-btn" id="btn-sound" title="音效开关">🔊 声音: 开</button>
         <button class="pill-btn" id="btn-bgm" title="程序化生成极简 Lofi 氛围音乐">🎵 音乐: 关</button>
         <button class="pill-btn" id="btn-weather" title="切换天气">☀️ 晴空</button>
@@ -217,6 +218,106 @@
         <span>💡 选定物品后直接进入<b>放置模式</b>，移动光标自由预览吸附，左键放置！(快捷键 B 随时开关)</span>
       </div>
     </div>
+  </div>
+
+  <!-- 底层绘制引擎与标签聚类调控中心模态框 (Render Engine Tuner Modal) -->
+  <div class="modal-overlay" id="render-tuner-modal">
+    <div class="tuner-card">
+      <div class="tuner-header">
+        <h3>⚙️ 底层绘制引擎与标签折叠调控中心</h3>
+        <button class="btn-close" id="btn-close-tuner">&times;</button>
+      </div>
+      <div class="tuner-body">
+        <!-- 场景调优预设 -->
+        <div class="tuner-section">
+          <div class="tuner-section-title">⚡ 一键场景调优预设 (Presets)</div>
+          <div class="preset-grid">
+            <button class="preset-btn" data-preset="saver">
+              <b>🔋 极致节能省电</b>
+              <span>离屏Sprite预烘焙 · 极简微标 · 30粒子</span>
+            </button>
+            <button class="preset-btn active" data-preset="balanced">
+              <b>🐾 萌系平衡推荐</b>
+              <span>Q萌水汪双眼 · 智能聚类防撞 · 100粒子</span>
+            </button>
+            <button class="preset-btn" data-preset="ultra">
+              <b>🧬 次世代高精全开</b>
+              <span>5节脊椎骨骼宝石眼 · 全量展开 · 240粒子</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 渲染管线与优化配置 -->
+        <div class="tuner-section">
+          <div class="tuner-section-title">🎨 猫咪渲染管线与离屏加速</div>
+          <div class="control-row">
+            <span class="control-label">管线模式:</span>
+            <div class="toggle-group" id="tuner-pipeline-group">
+              <button class="tuner-opt-btn active" data-val="chibi">Q 萌团子 (Chibi)</button>
+              <button class="tuner-opt-btn" data-val="chibi_cached">极速离屏烘焙 (Cached)</button>
+              <button class="tuner-opt-btn" data-val="procedural">次世代骨骼拟真</button>
+            </div>
+          </div>
+          <div class="control-row">
+            <span class="control-label">离屏 Sprite 缓存烘焙:</span>
+            <label class="switch-toggle">
+              <input type="checkbox" id="chk-sprite-cache" checked>
+              <span class="switch-slider"></span>
+            </label>
+            <span class="control-tip">（预生成静态躯干，节省 80% 路径与颜色切换）</span>
+          </div>
+          <div class="control-row">
+            <span class="control-label">灵动双眼视线追踪:</span>
+            <label class="switch-toggle">
+              <input type="checkbox" id="chk-eye-tracking" checked>
+              <span class="switch-slider"></span>
+            </label>
+            <span class="control-tip">（双眼异瞳立体透视 + 随动注视）</span>
+          </div>
+        </div>
+
+        <!-- 标签折叠与空间聚类 -->
+        <div class="tuner-section">
+          <div class="tuner-section-title">🏷️ 空间聚类与标签分级折叠 (Anti-Crowd Cluster)</div>
+          <div class="control-row">
+            <span class="control-label">折叠策略:</span>
+            <div class="toggle-group" id="tuner-cluster-group">
+              <button class="tuner-opt-btn active" data-val="smart">智能聚类防重叠 (Smart)</button>
+              <button class="tuner-opt-btn" data-val="minimal">极简微标模式 (Minimal)</button>
+              <button class="tuner-opt-btn" data-val="full">经典全量展开 (Full)</button>
+            </div>
+          </div>
+          <div class="control-tip" style="margin-top: 8px;">
+            💡 智能聚类模式会在多猫扎堆时自动聚合为折叠胶囊，相邻单猫名牌自动错位避让，彻底消除文字重叠与光污染！
+          </div>
+        </div>
+
+        <!-- 实时遥测指标 -->
+        <div class="tuner-section">
+          <div class="tuner-section-title">📊 引擎实时遥测 (Live Telemetry)</div>
+          <div class="telemetry-grid">
+            <div class="telemetry-item"><span>实时帧率</span><b id="tuner-fps">60 FPS</b></div>
+            <div class="telemetry-item"><span>单帧耗时</span><b id="tuner-ms">1.2 ms</b></div>
+            <div class="telemetry-item"><span>活动团簇</span><b id="tuner-clusters">0 个</b></div>
+            <div class="telemetry-item"><span>视口猫咪</span><b id="tuner-visible-cats">0 只</b></div>
+            <div class="telemetry-item"><span>离屏缓存命中</span><b id="tuner-cache-hit">100%</b></div>
+            <div class="telemetry-item"><span>视口剔除实体</span><b id="tuner-culled">0</b></div>
+          </div>
+          <div class="control-row" style="margin-top: 10px;">
+            <span class="control-label">在主屏幕常驻遥测浮窗:</span>
+            <label class="switch-toggle">
+              <input type="checkbox" id="chk-show-telemetry">
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 主界面微型遥测 HUD -->
+  <div id="telemetry-hud" style="display: none;">
+    <span id="telem-hud-fps">60 FPS</span> · <span id="telem-hud-ms">1.2ms</span> · <span id="telem-hud-cats">🐾 0只</span> · <span id="telem-hud-cluster">📦 0簇</span>
   </div>
 
   <!-- 纯原生 JS 模块 (零外部依赖，支持直接 double-click 本地打开) -->
