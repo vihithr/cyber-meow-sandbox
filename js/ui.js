@@ -8,6 +8,30 @@
   const { soundEngine, HATS } = window.CyberMeow;
   const CHALLENGE_DURATION = 45;
 
+  const BUILD_CATALOG = {
+    cats: [
+      { id: 'cat', icon: '🐱', name: '召唤新猫咪', desc: '领养一只随机品种与性格的萌猫入住豪宅', action: '召唤' },
+      { id: 'fish', icon: '🐟', name: '香脆小鱼干', desc: '美味小鱼干零食，猫咪闻香飞奔吃掉补充饱腹度', action: '投喂' },
+      { id: 'catnip', icon: '🌿', name: '猫薄荷喷雾', desc: '快乐神草！让附近的猫咪陷入极乐打滚与兔子蹬', action: '喷洒' }
+    ],
+    toys: [
+      { id: 'yarn', icon: '🧶', name: '弹力毛线球', desc: '带物理弹力的毛线球，猫咪扑咬蹬踹散落线段', action: '放置' },
+      { id: 'feather', icon: '🪶', name: '飘逸逗猫棒', desc: '挥动羽毛吸引小猫咪捕猎跳跃与扑击', action: '选用' },
+      { id: 'laser', icon: '🔴', name: '激光红点', desc: '在屏幕上移动，猫咪们会集体兴奋飞扑追逐', action: '选用' }
+    ],
+    furniture: [
+      { id: 'box', icon: '📦', name: '经典纸箱', desc: '猫咪最爱的安乐窝，胖猫还会卡屁股变装甲车', action: '放置' },
+      { id: 'roomba', icon: '🤖', name: '智能扫地机', desc: '地面巡逻推撞障碍物，猫咪还能跳上去霸气骑乘', action: '放置' },
+      { id: 'scratcher', icon: '🪵', name: '瓦楞猫抓板', desc: '剑麻耐磨抓板，让猫咪磨爪解压保护家具', action: '放置' },
+      { id: 'recycle', icon: '🧹', name: '单体回收工具', desc: '点击任意散落玩具或家具将其一键温和回收', action: '选用' }
+    ],
+    structures: [
+      { id: 'cattree', icon: '🌳', name: '豪华猫爬架', desc: '三层跳台带红色吊球，猫咪可阶梯飞跃登顶俯瞰', action: '搭建' },
+      { id: 'bridge', icon: '🌉', name: '空中悬索天桥', desc: '跨越客厅上空的空中走廊，带木板受力下沉形变', action: '搭建' },
+      { id: 'hammock', icon: '☁️', name: '高空全景吊床', desc: '天花板悬吊双链软榻，单摆阻尼摆动与惬意午睡', action: '悬挂' }
+    ]
+  };
+
   class UIManager {
     constructor() {
       this.selectedCat = null;
@@ -27,6 +51,95 @@
       this.bindPassportEvents();
       this.bindSnapshotEvents();
       this.bindStudioEvents();
+      this.bindCatalogEvents();
+    }
+
+    // --- 建造与摆放仓库系统 (Build Catalog) ---
+    openBuildCatalog() {
+      const modal = document.getElementById('build-catalog-modal');
+      if (!modal) return;
+      this.currentCatalogTab = this.currentCatalogTab || 'cats';
+      this.renderCatalogGrid(this.currentCatalogTab);
+      modal.classList.add('open');
+      soundEngine.playPop();
+    }
+
+    closeBuildCatalog() {
+      const modal = document.getElementById('build-catalog-modal');
+      if (modal) modal.classList.remove('open');
+    }
+
+    renderCatalogGrid(categoryKey) {
+      this.currentCatalogTab = categoryKey;
+      const container = document.getElementById('catalog-grid-items');
+      if (!container) return;
+      container.innerHTML = '';
+
+      document.querySelectorAll('.catalog-tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === categoryKey);
+      });
+
+      const items = BUILD_CATALOG[categoryKey] || [];
+      items.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'catalog-item-card';
+        card.innerHTML = `
+          <div class="catalog-item-icon">${item.icon}</div>
+          <div class="catalog-item-info">
+            <div class="catalog-item-title">${item.name}</div>
+            <div class="catalog-item-desc">${item.desc}</div>
+          </div>
+          <div class="catalog-item-action">
+            <button class="pill-btn active" style="padding: 6px 12px; font-size: 0.8rem;">${item.action}</button>
+          </div>
+        `;
+        const actionBtn = card.querySelector('button');
+        if (actionBtn) {
+          actionBtn.onclick = () => {
+            this.closeBuildCatalog();
+            const app = window.CyberMeow.app;
+            if (app) {
+              if (item.id === 'laser' || item.id === 'feather') {
+                app.setTool(item.id);
+              } else {
+                app.startPlacement(item.id);
+              }
+            }
+          };
+        }
+        container.appendChild(card);
+      });
+    }
+
+    bindCatalogEvents() {
+      const openBtn = document.getElementById('btn-build-catalog');
+      if (openBtn) openBtn.onclick = () => this.openBuildCatalog();
+
+      const closeBtn = document.getElementById('btn-close-catalog');
+      if (closeBtn) closeBtn.onclick = () => this.closeBuildCatalog();
+
+      document.querySelectorAll('.catalog-tab-btn').forEach(btn => {
+        btn.onclick = () => {
+          const tab = btn.dataset.tab;
+          if (tab) this.renderCatalogGrid(tab);
+        };
+      });
+
+      const cancelPlacementBtn = document.getElementById('btn-cancel-placement');
+      if (cancelPlacementBtn) {
+        cancelPlacementBtn.onclick = () => {
+          const app = window.CyberMeow.app;
+          if (app && app.cancelPlacement) app.cancelPlacement();
+        };
+      }
+
+      const lodBtn = document.getElementById('btn-cat-lod');
+      if (lodBtn) {
+        lodBtn.onclick = () => {
+          const app = window.CyberMeow.app;
+          if (app && app.toggleCatLOD) app.toggleCatLOD();
+        };
+      }
     }
 
     showToast(msg, duration = 3000) {

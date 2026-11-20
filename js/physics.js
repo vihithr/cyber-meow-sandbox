@@ -129,8 +129,66 @@
     }
   }
 
+  // 统一挂载与占用系统 (Mount & Occupancy System)
+  // 统一管理猫与环境实体（纸箱、扫地机、跳台、悬索桥、吊床）之间的附着与脱钩，
+  // 消除私有状态分散导致的悬空引用与状态死锁
+  class MountSystem {
+    static mount(cat, host, type) {
+      if (!cat || !host) return;
+      this.dismount(cat);
+
+      cat._mountHost = host;
+      cat._mountType = type || host.type;
+
+      if (host.type === 'box') {
+        cat.inBox = host;
+        host.occupant = cat;
+        cat.state = 'in_box';
+      } else if (host.type === 'roomba') {
+        cat.ridingObj = host;
+        host.rider = cat;
+        cat.state = 'riding';
+      } else if (host.type === 'perch') {
+        cat.perchedTier = host;
+        host.occupant = cat;
+      } else if (host.type === 'bridge') {
+        cat.onBridge = host;
+      } else if (host.type === 'hammock') {
+        cat.inHammock = true;
+        cat.state = 'in_hammock';
+      }
+    }
+
+    static dismount(cat) {
+      if (!cat) return;
+      if (cat.inBox) {
+        if (cat.inBox.occupant === cat) cat.inBox.occupant = null;
+        cat.inBox = null;
+        cat.boxTimer = 0;
+      }
+      if (cat.ridingObj) {
+        if (cat.ridingObj.rider === cat) cat.ridingObj.rider = null;
+        cat.ridingObj = null;
+        cat.rideTimer = 0;
+      }
+      if (cat.perchedTier) {
+        if (cat.perchedTier.occupant === cat) cat.perchedTier.occupant = null;
+        cat.perchedTier = null;
+      }
+      cat.onBridge = false;
+      cat.inHammock = false;
+      if (cat.heldYarn) {
+        if (cat.heldYarn.heldBy === cat) cat.heldYarn.heldBy = null;
+        cat.heldYarn = null;
+      }
+      cat._mountHost = null;
+      cat._mountType = null;
+    }
+  }
+
   window.CyberMeow = window.CyberMeow || {};
   window.CyberMeow.MathUtils = MathUtils;
   window.CyberMeow.VerletChain = VerletChain;
+  window.CyberMeow.MountSystem = MountSystem;
   window.CyberMeow.physicsWorld = new PhysicsWorld();
 })(window);

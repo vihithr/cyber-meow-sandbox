@@ -29,6 +29,7 @@
     CeilingDanglingToy,
     WaterMug,
     WaterPuddle,
+    MountSystem,
     BREEDS,
     PERSONALITIES
   } = window.CyberMeow;
@@ -82,7 +83,19 @@
       // 控制状态
       this.currentTool = 'pet';
       this.laser = { x: -100, y: -100, active: false };
-      this.mouse = { x: this.width / 2, y: this.height / 2, isDown: false, draggedCat: null };
+      this.mouse = { x: this.width / 2, y: this.height / 2, isDown: false, draggedCat: null, dragCandidate: null, dragStartPos: { x: 0, y: 0 } };
+
+      // 猫咪渲染模式：'chibi' (Q萌团子，默认常态极速) | 'procedural' (次世代高精拟真)
+      this.catRenderStyle = 'chibi';
+
+      // 建造与放置模式系统 (Placement Engine)
+      this.placement = {
+        active: false,
+        itemType: null,
+        ghostX: 0,
+        ghostY: 0,
+        valid: true
+      };
 
       // 拖拽抚摸与双击检测
       this.petDistanceTracker = 0;
@@ -118,6 +131,7 @@
       this.bindInputs();
       this.bindUIButtons();
       this.bindManorNavigation();
+      this.bindMiniMap();
       this.updateHud();
 
       // 启动主渲染循环
@@ -221,9 +235,141 @@
         'cattree': '🌳 放置猫爬架：猫咪可以跳上多层平台登高望远！',
         'roomba': '🤖 智能扫地机：地面巡逻并推撞开障碍物，猫咪可骑乘！',
         'scratcher': '🪵 放置猫抓板：让猫咪磨爪子，保护家具！',
-        'catnip': '🌿 猫薄荷喷雾：让猫咪陷入极乐打滚与兔子蹬！'
+        'catnip': '🌿 猫薄荷喷雾：让猫咪陷入极乐打滚与兔子蹬！',
+        'recycle': '🧹 回收工具：点击任意散落玩具或家具将其一键温和回收！'
       };
       uiManager.showToast(hints[tool] || '');
+    }
+
+    toggleCatLOD() {
+      this.catRenderStyle = this.catRenderStyle === 'chibi' ? 'procedural' : 'chibi';
+      const lodBtn = document.getElementById('btn-cat-lod');
+      const isChibi = this.catRenderStyle === 'chibi';
+      if (lodBtn) {
+        lodBtn.innerText = isChibi ? '🐱 风格: Q萌团子' : '🐱 风格: 高精拟真';
+        lodBtn.style.color = isChibi ? '#feca57' : '#1dd1a1';
+      }
+      uiManager.showToast(isChibi ? '🐱 已切换至「Q萌团子」极速渲染模式（60FPS 极佳流畅度）~' : '🐱 已切换至「次世代高精拟真」解剖骨骼渲染模式~');
+    }
+
+    startPlacement(itemType) {
+      this.placement.active = true;
+      this.placement.itemType = itemType;
+      this.placement.ghostX = this.mouse.x;
+      this.placement.ghostY = this.mouse.y;
+
+      const itemNames = {
+        cat: '🐱 随机萌猫',
+        fish: '🐟 小鱼干',
+        catnip: '🌿 猫薄荷喷雾',
+        yarn: '🧶 弹力毛线球',
+        box: '📦 经典纸箱',
+        cattree: '🌳 豪华猫爬架',
+        roomba: '🤖 智能扫地机',
+        scratcher: '🪵 瓦楞抓板',
+        bridge: '🌉 悬索天桥',
+        hammock: '☁️ 全景吊床'
+      };
+
+      const hud = document.getElementById('placement-hud');
+      const hint = document.getElementById('placement-hint');
+      if (hud) hud.style.display = 'flex';
+      if (hint) hint.innerText = `🔨 正在放置: 【${itemNames[itemType] || itemType}】`;
+      uiManager.showToast(`🔨 放置模式开启！移动鼠标预览位置，左键点击放置，右键或 ESC 取消~`);
+    }
+
+    cancelPlacement() {
+      if (!this.placement.active) return;
+      this.placement.active = false;
+      this.placement.itemType = null;
+      const hud = document.getElementById('placement-hud');
+      if (hud) hud.style.display = 'none';
+      uiManager.showToast('已退出放置模式~');
+    }
+
+    executePlacement(worldX, worldY) {
+      const type = this.placement.itemType;
+      const floorY = physicsWorld.getFloorY(this.height);
+
+      if (type === 'cat') {
+        if (this.cats.length >= MAX_CATS) {
+          uiManager.showToast(`🐾 猫咪已达上限 ${MAX_CATS} 只！`);
+          this.cancelPlacement();
+          return;
+        }
+        const newCat = new Cat(worldX, worldY);
+        this.cats.push(newCat);
+        soundEngine.playMeow(newCat.pitchMod, 'chirp');
+        this.spawnParticle(worldX, worldY - 20, '✨🐱');
+        this.saveState();
+      } else if (type === 'fish') {
+        this.toys.push(new FishTreat(worldX, worldY));
+        soundEngine.playPop();
+      } else if (type === 'yarn') {
+        this.toys.push(new YarnBall(worldX, worldY));
+        soundEngine.playPop();
+      } else if (type === 'box') {
+        this.furniture.push(new CardboardBox(worldX, floorY - 25));
+        soundEngine.playPop();
+      } else if (type === 'cattree') {
+        this.furniture.push(new CatTree(worldX, this.height));
+        soundEngine.playPop();
+      } else if (type === 'roomba') {
+        this.furniture.push(new Roomba(worldX, this.height - 20));
+        soundEngine.playPop();
+      } else if (type === 'scratcher') {
+        this.furniture.push(new Scratcher(worldX, this.height));
+        soundEngine.playPop();
+      } else if (type === 'bridge') {
+        this.furniture.push(new CatSuspensionBridge(worldX, worldY, 280));
+        soundEngine.playPop();
+      } else if (type === 'hammock') {
+        this.furniture.push(new AerialHammock(worldX, worldY, 115));
+        soundEngine.playPop();
+      } else if (type === 'catnip') {
+        soundEngine.playPop();
+        for (let i = 0; i < 20; i++) {
+          this.spawnParticle(worldX + (Math.random() - 0.5) * 80, worldY + (Math.random() - 0.5) * 80, '🌿');
+        }
+        for (let c of this.cats) {
+          if (Math.hypot(c.x - worldX, c.y - worldY) < 320) {
+            c.catnipEnergy = 300;
+            c.vy = -7;
+            soundEngine.playMeow(c.pitchMod * 1.25, 'chatter');
+          }
+        }
+      }
+
+      this.spawnParticle(worldX, worldY - 10, '✨🔨');
+      this.updateHud();
+      this.cancelPlacement();
+    }
+
+    drawGhostPreview(ctx) {
+      if (!this.placement.active) return;
+      const { ghostX, ghostY, itemType } = this.placement;
+      const floorY = physicsWorld.getFloorY(this.height);
+      const isGroundItem = (itemType === 'cattree' || itemType === 'scratcher' || itemType === 'roomba' || itemType === 'box');
+      const snapY = isGroundItem ? (floorY - 20) : ghostY;
+
+      ctx.save();
+      ctx.globalAlpha = 0.75;
+
+      ctx.beginPath();
+      ctx.arc(ghostX, snapY, 32, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(29, 209, 161, 0.25)';
+      ctx.fill();
+      ctx.strokeStyle = '#1dd1a1';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([5, 5]);
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('✔️ 点击放置', ghostX, snapY - 42);
+
+      ctx.restore();
     }
 
     // 屏幕像素坐标转世界坐标
@@ -268,6 +414,42 @@
         this.mouse.y = pos.y;
         this.mouse.isDown = true;
         this.lastMousePos = { x: pos.x, y: pos.y };
+
+        // 0. 放置模式拦截：左键确认放置，右键取消
+        if (this.placement.active) {
+          if (e.button === 0) {
+            this.executePlacement(pos.x, pos.y);
+          } else {
+            this.cancelPlacement();
+          }
+          return;
+        }
+
+        // 0.5. 回收工具：点击任意散落玩具或家具温和收纳
+        if (this.currentTool === 'recycle') {
+          for (let i = this.toys.length - 1; i >= 0; i--) {
+            const t = this.toys[i];
+            if (t && Math.hypot(t.x - pos.x, t.y - pos.y) < (t.radius || 20) + 14) {
+              this.toys.splice(i, 1);
+              soundEngine.playPop();
+              this.spawnParticle(pos.x, pos.y, '💨 已收纳');
+              this.updateHud();
+              return;
+            }
+          }
+          for (let i = this.furniture.length - 1; i >= 0; i--) {
+            const f = this.furniture[i];
+            const fw = f.w || f.width || 50;
+            if (f && Math.abs(f.x - pos.x) < fw / 2 + 15 && Math.abs(f.y - pos.y) < 70) {
+              for (let c of this.cats) MountSystem.dismount(c);
+              this.furniture.splice(i, 1);
+              soundEngine.playPop();
+              this.spawnParticle(pos.x, pos.y, '💨 已回收');
+              this.updateHud();
+              return;
+            }
+          }
+        }
 
         // 2. 检测是否按中了家具进行特色交互 (投喂机/猫爬架玩球登高/吊床摇摆/风铃羽毛球/空中天桥)
         for (let f of this.furniture) {
@@ -352,18 +534,10 @@
           this.lastClickedCat = clickedCat;
           this.lastClickTime = now;
 
-          // 抓起猫咪：彻底清除它身上的依附引用，保证随时能放回！
+          // 抓起猫咪：统一通过 MountSystem 清除依附引用，保证随时能放回！
           this.mouse.draggedCat = clickedCat;
           clickedCat.isGrabbed = true;
-          if (clickedCat.ridingObj) {
-            if (clickedCat.ridingObj.rider === clickedCat) clickedCat.ridingObj.rider = null;
-            clickedCat.ridingObj = null;
-          }
-          if (clickedCat.inBox) {
-            if (clickedCat.inBox.occupant === clickedCat) clickedCat.inBox.occupant = null;
-            clickedCat.inBox = null;
-          }
-          clickedCat.perchedTier = null;
+          MountSystem.dismount(clickedCat);
           clickedCat.pet(this);
           return;
         }
@@ -433,6 +607,11 @@
         this.mouse.y = pos.y;
         this.laser.x = pos.x;
         this.laser.y = pos.y;
+
+        if (this.placement.active) {
+          this.placement.ghostX = pos.x;
+          this.placement.ghostY = pos.y;
+        }
 
         featherWand.update(pos.x, pos.y, Math.min((this.dt || 1 / 60) * 60, 3));
 
@@ -518,6 +697,19 @@
           this.targetCameraX = Math.max(0, this.targetCameraX - 120);
         } else if (key === 'd' || e.code === 'ArrowRight') {
           this.targetCameraX = Math.min(maxCamX, this.targetCameraX + 120);
+        } else if (key === 'b') {
+          const catalog = document.getElementById('build-catalog-modal');
+          if (catalog && catalog.classList.contains('open')) {
+            uiManager.closeBuildCatalog();
+          } else {
+            uiManager.openBuildCatalog();
+          }
+        } else if (key === 't') {
+          this.toggleCatLOD();
+        } else if (e.code === 'Escape') {
+          if (this.placement.active) this.cancelPlacement();
+          uiManager.closeBuildCatalog();
+          uiManager.closeCatPassport();
         } else if (key === '1') this.setTool('pet');
         else if (key === '2') this.setTool('cat');
         else if (key === '3') this.setTool('laser');
@@ -1078,11 +1270,18 @@
       if (this.toys.length > MAX_TOYS) this.toys.splice(0, this.toys.length - MAX_TOYS);
       if (this.furniture.length > MAX_FURNITURE) this.furniture.splice(0, this.furniture.length - MAX_FURNITURE);
 
-      // 6. 猫咪更新与绘制 (分层渲染确保交互自然)
+      // 6. 猫咪更新与绘制 (支持 LOD 双模：常态 Q 萌团子 / 次世代高精拟真)
       // 取舍：猫的 update 负责吃鱼 splice / 骑行 / 附着状态，全部执行；被拖拽的猫强制绘制。
       for (let c of this.cats) {
         c.update(worldWidth, height, this);
-        if (c === this.mouse.draggedCat || this._isVisibleX(c.x, (c.radius || 22) + 40)) c.draw(ctx);
+        if (c === this.mouse.draggedCat || this._isVisibleX(c.x, (c.radius || 22) + 40)) {
+          c.draw(ctx, worldWidth, height, { style: this.catRenderStyle });
+        }
+      }
+
+      // 7. 放置模式建造虚影预览
+      if (this.placement.active) {
+        this.drawGhostPreview(ctx);
       }
 
       // 7. 逗猫棒
@@ -1132,7 +1331,79 @@
       // --- 退出世界相机空间变换 ---
       ctx.restore();
 
+      // 11. 豪宅全景导航小地图雷达绘制 (屏幕坐标系，不随相机缩放)
+      this.renderMiniMap();
+
       requestAnimationFrame(this.loop);
+    }
+
+    bindMiniMap() {
+      const container = document.getElementById('minimap-container');
+      const canvas = document.getElementById('minimap-canvas');
+      if (!canvas || !container) return;
+      this.miniMapCanvas = canvas;
+      this.miniMapCtx = canvas.getContext('2d');
+
+      const handleMinimapPan = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const clickRatio = MathUtils.clamp((e.clientX - rect.left) / rect.width, 0, 1);
+        const worldTargetX = clickRatio * this.worldWidth;
+        const maxCamX = Math.max(0, this.worldWidth - this.viewportWidth / this.zoom);
+        this.targetCameraX = MathUtils.clamp(worldTargetX - (this.viewportWidth / (2 * this.zoom)), 0, maxCamX);
+      };
+
+      let isDown = false;
+      container.addEventListener('pointerdown', (e) => {
+        isDown = true;
+        handleMinimapPan(e);
+      });
+      window.addEventListener('pointermove', (e) => {
+        if (isDown) handleMinimapPan(e);
+      });
+      window.addEventListener('pointerup', () => { isDown = false; });
+    }
+
+    renderMiniMap() {
+      if (!this.miniMapCanvas || !this.miniMapCtx) return;
+      const ctx = this.miniMapCtx;
+      const w = this.miniMapCanvas.width;
+      const h = this.miniMapCanvas.height;
+      const scaleX = w / this.worldWidth;
+
+      ctx.clearRect(0, 0, w, h);
+
+      // 背景与豪宅三区分割线
+      ctx.fillStyle = '#181926';
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(1000 * scaleX, 0); ctx.lineTo(1000 * scaleX, h);
+      ctx.moveTo(2000 * scaleX, 0); ctx.lineTo(2000 * scaleX, h);
+      ctx.stroke();
+
+      // 地平线
+      ctx.fillStyle = '#2c2d3e';
+      ctx.fillRect(0, h - 6, w, 6);
+
+      // 绘制猫咪实时光点
+      for (const c of this.cats) {
+        const mx = c.x * scaleX;
+        const my = (c.y / this.height) * (h - 10) + 2;
+        ctx.fillStyle = c.breed ? c.breed.bodyColor : '#feca57';
+        ctx.beginPath();
+        ctx.arc(mx, MathUtils.clamp(my, 4, h - 6), 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // 视口取景框
+      const viewW = (this.viewportWidth / this.zoom) * scaleX;
+      const viewX = this.cameraX * scaleX;
+      ctx.strokeStyle = '#feca57';
+      ctx.lineWidth = 1.5;
+      ctx.fillStyle = 'rgba(254, 202, 87, 0.12)';
+      ctx.fillRect(viewX, 1, viewW, h - 2);
+      ctx.strokeRect(viewX, 1, viewW, h - 2);
     }
   }
 

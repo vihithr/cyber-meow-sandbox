@@ -2677,7 +2677,238 @@
     }
 
     draw(ctx, width, height, options = {}) {
+      const globalStyle = (typeof window !== 'undefined' && window.CyberMeow && window.CyberMeow.catRenderStyle);
+      const style = options.style || this.renderStyle || globalStyle;
+      if (style === 'chibi') {
+        return this.renderChibiLoaf(ctx, width, height, options);
+      }
       return this.render(ctx, width, height, options);
+    }
+
+    // ============================================================================
+    // 6.5. Q 萌猫团子渲染管线 (Chibi Mochi Cat — 宏观沙盒常态 60 FPS 极速渲染)
+    // ============================================================================
+    renderChibiLoaf(ctx, width, height, options = {}) {
+      const breed = this.breed;
+      const R = this.radius || 22;
+      const isWalk = (this.state === 'walk' || this.state === 'walking' || this.state === 'running' ||
+                      this.state === 'trot' || this.state === 'zoomies' || this.state === 'aerial_patrol_walk');
+      const isLoaf = (this.state === 'loaf');
+      const isSleeping = (this.state === 'sleeping');
+      const isCrouch = (this.state === 'crouch' || this.state === 'stalking' || this.state === 'stealth_stalk' ||
+                        this.state === 'stealth_freeze' || this.state === 'aerial_pounce_aim');
+
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.scale(this.facing, 1);
+      this._textCTM = ctx.getTransform ? ctx.getTransform() : null;
+
+      // 动态 Q 弹呼吸与形变 (Squash & Stretch)
+      let sx = 1.0;
+      let sy = 1.0;
+      let bounceY = 0;
+      let rot = 0;
+
+      if (this.isGrabbed || this.state === 'grabbed') {
+        sx = 0.72;
+        sy = clamp(this.grabStretch || 1.35, 1.1, 1.8);
+      } else if (this.state === 'jumping' || this.state === 'pouncing' || this.state === 'aerial_pounce_drop') {
+        rot = Math.atan2(this.vy, Math.abs(this.vx) + 0.1) * 0.35;
+        sx = 1.22;
+        sy = 0.82;
+      } else if (isWalk) {
+        bounceY = Math.sin((this.walkCycle || 0) * 2) * 2.2;
+        sx = 1.0 + Math.sin((this.walkCycle || 0) * 2) * 0.08;
+        sy = 1.0 - Math.sin((this.walkCycle || 0) * 2) * 0.08;
+      } else if (isLoaf || isSleeping) {
+        const breathe = Math.sin(Date.now() * 0.004 + (this.x % 10)) * 1.5;
+        sx = 1.15;
+        sy = 0.85;
+        bounceY = breathe;
+      } else if (isCrouch) {
+        sx = 1.25;
+        sy = 0.75;
+        bounceY = 3;
+      }
+
+      ctx.rotate(rot);
+      ctx.scale(sx, sy);
+
+      // 1. 软萌地面阴影
+      if (!this.isGrabbed && this.state !== 'jumping' && this.state !== 'aerial_pounce_drop') {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+        ctx.beginPath();
+        ctx.ellipse(0, 4, R * 1.15, 6, 0, 0, TAU);
+        ctx.fill();
+      }
+
+      // 2. 摇摆小尾巴
+      const tailWiggle = Math.sin(Date.now() * 0.007 + this.x) * 0.35;
+      ctx.strokeStyle = breed.stripeColor || breed.shadowColor || breed.bodyColor;
+      ctx.lineWidth = 5.5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.75, -R * 0.6 + bounceY);
+      ctx.quadraticCurveTo(-R * 1.5, -R * 1.1 + tailWiggle * 8 + bounceY, -R * 1.3, -R * 1.6 + tailWiggle * 14 + bounceY);
+      ctx.stroke();
+
+      // 3. 软糯大汤圆身体 (Mochi Loaf Body)
+      ctx.fillStyle = breed.bodyColor;
+      ctx.beginPath();
+      ctx.ellipse(0, -R * 0.8 + bounceY, R * 1.18, R * 0.92, 0, 0, TAU);
+      ctx.fill();
+
+      // 3.1 品种专属花纹 (Tabby 条纹 / Calico 斑块 / Siamese 重点色)
+      if (breed.hasStripes) {
+        ctx.strokeStyle = breed.stripeColor || '#b35b14';
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = 'round';
+        [-0.3, 0.0, 0.3].forEach(off => {
+          ctx.beginPath();
+          ctx.arc(R * off, -R * 1.3 + bounceY, R * 0.45, Math.PI * 0.2, Math.PI * 0.8);
+          ctx.stroke();
+        });
+      } else if (breed.hasPatches) {
+        ctx.fillStyle = '#e58e35';
+        ctx.beginPath();
+        ctx.ellipse(-R * 0.4, -R * 1.1 + bounceY, R * 0.35, R * 0.25, 0.4, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = '#273240';
+        ctx.beginPath();
+        ctx.ellipse(R * 0.3, -R * 0.8 + bounceY, R * 0.3, R * 0.2, -0.3, 0, TAU);
+        ctx.fill();
+      }
+
+      // 4. 软乎乎白肚皮 / 浅色胸脯
+      ctx.fillStyle = breed.bellyColor;
+      ctx.beginPath();
+      ctx.ellipse(R * 0.15, -R * 0.55 + bounceY, R * 0.78, R * 0.52, 0, 0, TAU);
+      ctx.fill();
+
+      // 5. 软萌小肉垫爪爪
+      if (!isLoaf && !isSleeping) {
+        ctx.fillStyle = breed.socks ? breed.bellyColor : (breed.lightColor || breed.bodyColor);
+        ctx.beginPath();
+        ctx.arc(R * 0.45, -2 + bounceY, 4.5, 0, TAU);
+        ctx.arc(-R * 0.1, -2 + bounceY, 4.5, 0, TAU);
+        ctx.fill();
+      }
+
+      // 6. 圆萌立体小耳朵
+      const earSpread = R * 0.55;
+      const earY = -R * 1.45 + bounceY;
+      const drawEar = (ex, ey) => {
+        ctx.fillStyle = breed.isPointColor ? breed.pointColor : breed.bodyColor;
+        ctx.beginPath();
+        ctx.moveTo(ex - 7, ey + 4);
+        ctx.lineTo(ex, ey - 12);
+        ctx.lineTo(ex + 7, ey + 4);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = breed.earColor || '#eea0a0';
+        ctx.beginPath();
+        ctx.moveTo(ex - 4, ey + 3);
+        ctx.lineTo(ex, ey - 7);
+        ctx.lineTo(ex + 4, ey + 3);
+        ctx.closePath();
+        ctx.fill();
+      };
+      drawEar(-earSpread, earY);
+      drawEar(R * 0.15, earY);
+
+      // 7. 暹罗猫面部重点色面罩
+      if (breed.isPointColor) {
+        ctx.fillStyle = breed.pointColor;
+        ctx.beginPath();
+        ctx.ellipse(R * 0.42, -R * 0.75 + bounceY, R * 0.45, R * 0.38, 0, 0, TAU);
+        ctx.fill();
+      }
+
+      // 8. 灵动大萌眼
+      const eyeX = R * 0.42;
+      const eyeY = -R * 0.85 + bounceY;
+      const eyeR = 4.2;
+
+      if (isSleeping || isLoaf) {
+        ctx.strokeStyle = '#2d3436';
+        ctx.lineWidth = 1.8;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.arc(eyeX, eyeY + 1, 4, Math.PI * 1.1, Math.PI * 1.9);
+        ctx.stroke();
+      } else if (this.state === 'bridge_duel' || this.state === 'belly_trap') {
+        ctx.strokeStyle = '#2d3436';
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(eyeX - 4, eyeY - 3);
+        ctx.lineTo(eyeX + 3, eyeY);
+        ctx.lineTo(eyeX - 4, eyeY + 3);
+        ctx.stroke();
+      } else {
+        const eyeColor = (breed.id === 'white' && this.facing < 0 && breed.eyeRightColor) ? breed.eyeRightColor : breed.eyeColor;
+        ctx.fillStyle = eyeColor;
+        ctx.beginPath();
+        ctx.arc(eyeX, eyeY, eyeR, 0, TAU);
+        ctx.fill();
+
+        ctx.fillStyle = '#111';
+        ctx.beginPath();
+        ctx.arc(eyeX, eyeY, eyeR * 0.72, 0, TAU);
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(eyeX + 1.2, eyeY - 1.2, 1.4, 0, TAU);
+        ctx.arc(eyeX - 1.0, eyeY + 1.0, 0.7, 0, TAU);
+        ctx.fill();
+      }
+
+      // 9. 小粉鼻与软糯 `:3` 猫嘴
+      ctx.fillStyle = breed.noseColor || '#dd7676';
+      ctx.beginPath();
+      ctx.arc(R * 0.68, -R * 0.66 + bounceY, 2.2, 0, TAU);
+      ctx.fill();
+
+      ctx.strokeStyle = '#2d3436';
+      ctx.lineWidth = 1.2;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(R * 0.62, -R * 0.52 + bounceY, 2.6, 0, Math.PI * 0.9);
+      ctx.stroke();
+
+      // 10. 极简两根细胡须
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+      ctx.lineWidth = 1.0;
+      ctx.beginPath();
+      ctx.moveTo(R * 0.68, -R * 0.62 + bounceY);
+      ctx.lineTo(R * 1.15, -R * 0.72 + bounceY);
+      ctx.moveTo(R * 0.68, -R * 0.54 + bounceY);
+      ctx.lineTo(R * 1.12, -R * 0.44 + bounceY);
+      ctx.stroke();
+
+      // 11. 佩戴帽子与服饰
+      if (this.hat && this.hat !== 'none') {
+        this.drawHat(ctx, -R * 1.4 + bounceY, R * 0.75);
+      }
+
+      // 12. 文字、名字标签与气泡 (保证即使镜像也是正立的)
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      const textHeadY = -R * 1.6 + bounceY;
+      this._drawUprightText(ctx, () => {
+        ctx.fillText(this.name, 0, textHeadY - 8);
+      });
+
+      if (this.bubbleTimer > 0 && this.bubbleText) {
+        this.drawSpeechBubble(ctx, textHeadY - 14);
+      }
+      if (this.intentIcon) {
+        this.drawIntentBadge(ctx, textHeadY - (this.bubbleTimer > 0 ? 40 : 18));
+      }
+
+      ctx.restore();
     }
 
     // 抚摸交互

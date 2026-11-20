@@ -38,6 +38,8 @@
 
     <div class="hud-group">
       <div class="glass-card" style="padding: 6px 12px; gap: 8px;">
+        <button class="pill-btn" id="btn-build-catalog" title="打开建造与摆放仓库 (快捷键: B)" style="background: linear-gradient(135deg, #10ac84 0%, #1dd1a1 100%); color: #fff; font-weight: bold;">🔨 建造仓库 (B)</button>
+        <button class="pill-btn" id="btn-cat-lod" title="切换猫咪渲染模式：Q萌团子 / 高精拟真 (快捷键: T)">🐱 风格: Q萌团子</button>
         <button class="pill-btn" id="btn-sound" title="音效开关">🔊 声音: 开</button>
         <button class="pill-btn" id="btn-bgm" title="程序化生成极简 Lofi 氛围音乐">🎵 音乐: 关</button>
         <button class="pill-btn" id="btn-weather" title="切换天气">☀️ 晴空</button>
@@ -56,12 +58,19 @@
     <span>🏆 当前得分: <b id="challenge-score">0</b></span>
   </div>
 
-  <!-- 浮动操作提示 Toast -->
-  <div class="hint-toast" id="hint-text">💡 提示：右键拖拽平移豪宅，按 C 开启喵视角跟随猫咪！双击猫咪可抱入怀中特写侍奉~</div>
+  <!-- 建造/放置模式实时悬浮指示栏 -->
+  <div id="placement-hud" style="display: none;">
+    <span id="placement-hint">🔨 放置模式：【豪华猫爬架】</span>
+    <span style="font-size: 0.8rem; opacity: 0.85;">左键点击放置 · ESC / 右键取消</span>
+    <button class="pill-btn" id="btn-cancel-placement" style="padding: 2px 10px; font-size: 0.75rem; background: rgba(255,255,255,0.2);">取消 (ESC)</button>
+  </div>
 
-  <!-- 底部多功能互动玩具与家具 Dock 抽屉 (支持一键折叠，安全避开猫咪) -->
-  <div id="dock-wrapper">
-    <button id="dock-toggle-btn">▼ 收起抽屉 (纯净吸猫)</button>
+  <!-- 浮动操作提示 Toast -->
+  <div class="hint-toast" id="hint-text">💡 提示：按 B 打开建造仓库摆放物品，按 T 切换 Q 萌/拟真渲染，右键拖拽平移豪宅！</div>
+
+  <!-- 底部多功能互动玩具与家具 Dock 抽屉 (默认折叠以保持纯净无遮挡) -->
+  <div id="dock-wrapper" class="collapsed">
+    <button id="dock-toggle-btn">▲ 展开侍奉坞</button>
     <div id="dock-container">
       <button class="dock-item active" data-tool="pet" title="快捷键: 1">👆 抚摸/抓起</button>
       <button class="dock-item" data-tool="cat" title="快捷键: 2">🐱 召唤猫咪</button>
@@ -76,8 +85,15 @@
       <button class="dock-item" data-tool="roomba" title="快捷键: 9">🤖 扫地机</button>
       <button class="dock-item" data-tool="scratcher">🪵 瓦楞抓板</button>
       <button class="dock-item" data-tool="catnip" title="快捷键: 0">🌿 猫薄荷喷雾</button>
+      <button class="dock-item" data-tool="recycle" title="回收点击的玩具或家具">🧹 单体回收</button>
       <button class="dock-item" id="btn-antigravity" title="快捷键: 空格键">🛸 反重力模式</button>
     </div>
+  </div>
+
+  <!-- 豪宅全景小地图雷达导航 (Manor Radar Minimap) -->
+  <div id="minimap-container" title="点击或拖拽小地图可快速平移镜头，实时显示全屋猫咪分布">
+    <canvas id="minimap-canvas" width="320" height="44"></canvas>
+    <div id="minimap-viewport"></div>
   </div>
 
   <!-- 主物理游戏画布 -->
@@ -175,6 +191,30 @@
       <div class="snapshot-actions">
         <button class="pill-btn active" id="btn-download-snap">💾 下载相片 (PNG)</button>
         <button class="pill-btn" id="btn-close-snapshot">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 建造仓库与摆放分类菜单模态框 (Build Catalog Modal) -->
+  <div class="modal-overlay" id="build-catalog-modal">
+    <div class="catalog-card">
+      <div class="catalog-header">
+        <h3>🔨 豪宅筑巢指南 · 建造与摆放仓库</h3>
+        <button class="btn-close" id="btn-close-catalog">&times;</button>
+      </div>
+      <div class="catalog-tabs">
+        <button class="catalog-tab-btn active" data-tab="cats">🐱 猫咪与补给</button>
+        <button class="catalog-tab-btn" data-tab="toys">🧶 趣味玩具</button>
+        <button class="catalog-tab-btn" data-tab="furniture">📦 舒适家具</button>
+        <button class="catalog-tab-btn" data-tab="structures">🪜 攀爬猫道</button>
+      </div>
+      <div class="catalog-body">
+        <div class="catalog-grid" id="catalog-grid-items">
+          <!-- 由 ui.js 填充商品与设施卡片 -->
+        </div>
+      </div>
+      <div class="catalog-footer">
+        <span>💡 选定物品后直接进入<b>放置模式</b>，移动光标自由预览吸附，左键放置！(快捷键 B 随时开关)</span>
       </div>
     </div>
   </div>
