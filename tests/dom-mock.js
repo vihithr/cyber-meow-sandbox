@@ -38,8 +38,32 @@ const PATH_OP_METHODS = new Set([
 ]);
 
 function create2DContext(canvas, counters) {
+  // 真实追踪 2D 变换矩阵，使 getTransform 可用于验证镜像/旋转下的文字朝向。
+  // 矩阵按 CSS transform 约定存为 {a,b,c,d,e,f}。
+  let m = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+  const stack = [];
+  const mul = (n) => {
+    const a = m.a * n.a + m.c * n.b;
+    const b = m.b * n.a + m.d * n.b;
+    const c = m.a * n.c + m.c * n.d;
+    const d = m.b * n.c + m.d * n.d;
+    const e = m.a * n.e + m.c * n.f + m.e;
+    const f = m.b * n.e + m.d * n.f + m.f;
+    m = { a, b, c, d, e, f };
+  };
   const target = {
     canvas,
+    getTransform() { return { ...m }; },
+    setTransform(a, b, c, d, e, f) { m = { a, b, c, d, e, f }; },
+    resetTransform() { m = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }; },
+    translate(x, y) { mul({ a: 1, b: 0, c: 0, d: 1, e: x, f: y }); },
+    scale(x, y) { mul({ a: x, b: 0, c: 0, d: y, e: 0, f: 0 }); },
+    rotate(r) {
+      const cos = Math.cos(r), sin = Math.sin(r);
+      mul({ a: cos, b: sin, c: -sin, d: cos, e: 0, f: 0 });
+    },
+    save() { stack.push({ ...m }); },
+    restore() { if (stack.length) m = stack.pop(); },
     createLinearGradient() {
       counters.linearGradients++;
       return { addColorStop: noop };

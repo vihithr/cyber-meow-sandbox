@@ -761,6 +761,59 @@ function registerRuntimeTests(options) {
       sandbox.CyberMeow.renderQuality = savedQuality;
     }
   });
+
+  test('镜像文字：facing=-1 的猫，名字/气泡/徽章文字均为正向（矩阵 a>0）', () => {
+    const cat = new sandbox.CyberMeow.Cat(500, 500, { breed: sandbox.CyberMeow.BREEDS[0] });
+    const ctx = mock.document.createElement('canvas').getContext('2d');
+    const capture = () => {
+      const texts = [];
+      const original = ctx.fillText;
+      ctx.fillText = function (...args) {
+        texts.push({ text: args[0], a: ctx.getTransform().a });
+        return original.apply(this, args);
+      };
+      return { texts, restore: () => { ctx.fillText = original; } };
+    };
+
+    // 朝右：文字正向
+    cat.facing = 1;
+    cat.state = 'idle';
+    cat.bubbleTimer = 100;
+    cat.bubbleText = '喵';
+    cat.name = '测试猫';
+    let cap = capture();
+    assert.doesNotThrow(() => cat.draw(ctx, 1920, 1080));
+    cap.restore();
+    const rightTexts = cap.texts.filter(t => t.text === '测试猫' || t.text === '喵');
+    assert.ok(rightTexts.length >= 2, '未捕获到名字/气泡文字');
+    rightTexts.forEach(t => assert.ok(t.a > 0, `facing=1 文字被镜像: a=${t.a}`));
+
+    // 朝左：文字仍须正向（这是原 bug 所在）
+    cat.facing = -1;
+    cap = capture();
+    assert.doesNotThrow(() => cat.draw(ctx, 1920, 1080));
+    cap.restore();
+    const leftTexts = cap.texts.filter(t => t.text === '测试猫' || t.text === '喵');
+    assert.ok(leftTexts.length >= 2, '未捕获到朝左猫的名字/气泡文字');
+    leftTexts.forEach(t => assert.ok(t.a > 0, `facing=-1 文字倒转: a=${t.a}`));
+
+    // 爬树姿态：文字不应随躯干旋转 90°（b 分量应接近 0）
+    cat.state = 'climbing';
+    cat._climbBlend = 1;
+    const nameTransform = [];
+    const original = ctx.fillText;
+    ctx.fillText = function (...args) {
+      if (args[0] === '测试猫') { const t = ctx.getTransform(); nameTransform.push({ a: t.a, b: t.b }); }
+      return original.apply(this, args);
+    };
+    assert.doesNotThrow(() => cat.draw(ctx, 1920, 1080));
+    ctx.fillText = original;
+    assert.ok(nameTransform.length >= 1, '爬树状态未捕获到名字变换');
+    nameTransform.forEach(t => {
+      assert.ok(t.a > 0, `爬树文字被镜像: a=${t.a}`);
+      assert.ok(Math.abs(t.b) < 0.01, `爬树文字随躯干倾斜: b=${t.b}`);
+    });
+  });
 }
 
 module.exports = { registerRuntimeTests };

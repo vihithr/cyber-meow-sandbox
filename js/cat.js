@@ -251,7 +251,7 @@
       earSize: clamp(p.earSize + jitter(0.12), 0.78, 1.30),
       earSpread: clamp(p.earSpread + jitter(0.05), 0.52, 0.70),
       eyeSlant: clamp(p.eyeSlant + jitter(0.07), -0.10, 0.28),
-      eyeSize: 0.205 + rand() * 0.044,
+      eyeSize: 0.26 + rand() * 0.05,
       browWeight: rand() * 0.30,
       muzzle: clamp(p.muzzle + jitter(0.09), 0.32, 0.80),
       legRatio: p.legRatio || 1.0,
@@ -484,6 +484,7 @@
       this._tailPhase = 0;
       this._blinkTimerSec = 2.5 + Math.random() * 2.5;
       this._blinkAmt = 0;
+      this._climbBlend = 0;   // 爬树姿态平滑因子（0=常态，1=完全贴柱竖立）
       this.lookTarget = null; // 视线注视点
       this._smooth = {
         initialized: false,
@@ -514,6 +515,20 @@
       return g;
     }
 
+    // 在已被 facing 镜像／爬树旋转的坐标系里正向绘制文字。
+    // 用 render() 抓取的 textCTM（仅平移+缩放，不含姿态旋转）重置，再反向抵消 facing。
+    _drawUprightText(ctx, draw) {
+      const ctm = this._textCTM;
+      if (!ctm) { draw(); return; }
+      ctx.save();
+      ctx.setTransform(ctm.a, ctm.b, ctm.c, ctm.d, ctm.e, ctm.f);
+      ctx.scale(this.facing, 1);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      draw();
+      ctx.restore();
+    }
+
     _dampPt(cur, target, rate, dt) {
       const k = 1 - Math.exp(-rate * dt);
       return { x: lerp(cur.x, target.x, k), y: lerp(cur.y, target.y, k) };
@@ -538,6 +553,22 @@
       cur.curl = lerp(cur.curl, targetLeg.curl, 1 - Math.exp(-16 * dt));
       cur.yLift = lerp(cur.yLift, targetLeg.yLift, 1 - Math.exp(-18 * dt));
       return cur;
+    }
+
+    // 爬树专用爪位：身体被旋转 -90° 后，局部 +Y 指向柱面（屏幕右/左由 facing 决定）。
+    // 四爪沿局部 X（旋转后为屏幕竖直方向）对角交替抓握，由 climbCycle 驱动，避免四爪定格。
+    _computeClimbLeg(anchor, phaseOffset, baseX, scale) {
+      const reach = Math.sin(this.climbCycle + phaseOffset);
+      const tx = baseX + reach * 20 * scale;          // 沿柱面上下交替
+      const ty = 26 + (1 - Math.cos(this.climbCycle + phaseOffset)) * 5 * scale; // 抓握深度
+      const curl = 0.45 + Math.abs(reach) * 0.4;      // 抓握弯曲度随相位变化
+      const L1 = 22 * scale;
+      const L2 = 26 * scale;
+      const ik = solve2Bone(anchor.x, anchor.y, tx, ty, L1, L2, +1);
+      const pawAng = lerp(0.2, 1.1, curl);
+      const px = lerp(tx, ik.ex + Math.cos(pawAng) * 7 * 0.6, curl);
+      const py = lerp(ty, ik.ey + Math.sin(pawAng) * 7, curl);
+      return { p0: anchor, p1: { x: ik.jx, y: ik.jy }, p2: { x: ik.ex, y: ik.ey }, p3: { x: px, y: py }, curl, yLift: 0 };
     }
 
     _computeFrontLeg(shoulder, gSample, baseX, stride, lift, scale, isWalk) {
@@ -667,19 +698,22 @@
       ctx.restore();
     }
 
-    _drawTail(ctx, root, hipRoll) {
+    _drawTail(ctx, root, hipRoll, isClimbing) {
       const breed = this.breed;
       const pts = [];
       let x = root.x;
       let y = root.y;
       const segLen = lerp(8.0, 12.5, this.age);
       const tension = clamp(this.overstimulation / 100, 0, 1);
-      let ang = lerp(-Math.PI * 0.62, -Math.PI * 0.86, this.age) + hipRoll * 0.04;
+      // 爬树时身体旋转 -90°，尾巴应在屏幕上下垂（局部角度 ≈ +π/2），随爬升相位轻摆
+      let ang = isClimbing
+        ? Math.PI * 0.5 + Math.sin(this.climbCycle * 0.6) * 0.12
+        : lerp(-Math.PI * 0.62, -Math.PI * 0.86, this.age) + hipRoll * 0.04;
       pts.push({ x, y });
       for (let i = 1; i <= 7; i++) {
         const k = i / 7;
-        const curve = lerp(0.06 - k * 0.10, 0.19 - k * 0.32, this.age);
-        ang += curve + Math.sin(this._tailPhase - k * 2.1) * (0.08 + k * 0.09 + tension * 0.12);
+        const curve = isClimbing ? 0.02 : lerp(0.06 - k * 0.10, 0.19 - k * 0.32, this.age);
+        ang += curve + Math.sin(this._tailPhase - k * 2.1) * (isClimbing ? 0.04 : 0.08 + k * 0.09 + tension * 0.12);
         x += Math.cos(ang) * segLen;
         y += Math.sin(ang) * segLen;
         pts.push({ x, y });
@@ -809,7 +843,8 @@
       ctx.fill();
 
       // 上眼睑投影 (Upper Eyelid Shadow) — 渐变以 -openRy 为原点缓存，眨眼时临时平移保持一致
-      const lidH = ry * (0.52 + browWeight * 0.68);
+      // 压眼皮变浅，眼神由审视转为无辜（幼态关键）
+      const lidH = ry * (0.28 + browWeight * 0.30);
       if (lowQuality) {
         ctx.fillStyle = 'rgba(12, 16, 24, 0.36)';
         ctx.fillRect(-rx * 1.3, -openRy - 2, rx * 2.6, lidH + 2);
@@ -873,11 +908,11 @@
         const isFar = side === 1;
         const px = side * R * dna.earSpread + (isFar ? -turn * R * 0.16 : -turn * R * 0.06);
         const py = crownY + R * 0.14;
-        const h = R * 0.84 * dna.earSize;
+        const h = R * 0.66 * dna.earSize; // 耳朵缩小，不抢脸部焦点
         const w = R * 0.38 * (isFar ? (1 - turn * 0.18) : 1);
         ctx.save();
         ctx.translate(px, py);
-        ctx.rotate(side * (0.28 + (dna.earSpread - 0.58) * 0.7 + earAirplane) - turn * 0.14);
+        ctx.rotate(side * (0.20 + (dna.earSpread - 0.58) * 0.7 + earAirplane) - turn * 0.14);
 
         ctx.fillStyle = breed.isPointColor ? breed.pointColor : (isFar ? breed.shadowColor : breed.bodyColor);
         if (breed.hasPatches && side === -1) ctx.fillStyle = '#332d2b';
@@ -885,7 +920,9 @@
 
         ctx.beginPath();
         ctx.moveTo(-w, R * 0.30);
-        ctx.quadraticCurveTo(-w * 0.72, -h * 0.74, 0, -h);
+        // 耳尖改圆钝（原尖角 → 平缓双二次曲线），幼态更友好
+        ctx.quadraticCurveTo(-w * 0.85, -h * 0.92, -w * 0.22, -h);
+        ctx.quadraticCurveTo(w * 0.22, -h, w * 0.85, -h * 0.92);
         ctx.quadraticCurveTo(w * 0.72, -h * 0.74, w, R * 0.30);
         ctx.closePath();
         ctx.fill();
@@ -914,7 +951,7 @@
       drawEar(-1);
 
       // 3/4 雕塑微观猫脸轮廓 (平缓颅顶 + 眉骨微弯 + 胡须垫外展 + 紧凑下颚)
-      const chinY = R * 0.84;
+      const chinY = R * 0.70; // 下颚抬高，脸型更圆润幼态
       const browX = cheekW * (0.86 - turn * 0.16);
       const eyeIndentX = cheekW * (0.94 - turn * 0.34);
       const muzzleOuterX = cheekW * (0.72 - turn * 0.10) + muzzleShelf * (0.35 + turn * 1.15);
@@ -1060,8 +1097,8 @@
       ctx.fill();
 
       // 呼吸与重力下垂的柔性胡须
-      ctx.strokeStyle = breed.bodyColor === '#f5f6fa' ? 'rgba(130, 140, 160, 0.55)' : 'rgba(255, 255, 255, 0.78)';
-      ctx.lineWidth = Math.max(0.9, R * 0.026);
+      ctx.strokeStyle = breed.bodyColor === '#f5f6fa' ? 'rgba(130, 140, 160, 0.45)' : 'rgba(255, 255, 255, 0.55)';
+      ctx.lineWidth = Math.max(1.1, R * 0.030);
       // 6 根胡须同色同宽，合并为一次 stroke（moveTo 保持各自独立子路径）
       ctx.beginPath();
       [-1, 1].forEach((side) => {
@@ -1069,8 +1106,8 @@
         for (let i = -1; i <= 1; i++) {
           ctx.moveTo(muzzleShift + side * R * 0.25 * lenScale, padY + i * R * 0.07);
           ctx.quadraticCurveTo(
-            muzzleShift + side * R * 0.84 * lenScale, padY + i * R * 0.10,
-            muzzleShift + side * R * 1.38 * lenScale, padY + i * R * 0.20 + dna.whiskerDroop * R * 0.58
+            muzzleShift + side * R * 0.80 * lenScale, padY + i * R * 0.10,
+            muzzleShift + side * R * 1.20 * lenScale, padY + i * R * 0.18 + dna.whiskerDroop * R * 0.42
           );
         }
       });
@@ -1162,10 +1199,7 @@
       ctx.fill();
 
       ctx.shadowBlur = 0;
-      ctx.fillStyle = '#1e272e';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(this.bubbleText, 0, by + bh / 2);
+      this._drawUprightText(ctx, () => ctx.fillText(this.bubbleText, 0, by + bh / 2));
       ctx.restore();
     }
 
@@ -1191,9 +1225,7 @@
       ctx.stroke();
 
       ctx.fillStyle = '#f1f2f6';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label, 0, by + bh / 2 + 0.5);
+      this._drawUprightText(ctx, () => ctx.fillText(label, 0, by + bh / 2 + 0.5));
       ctx.restore();
     }
 
@@ -1218,11 +1250,15 @@
       ctx.save();
       ctx.translate(this.x, this.y);
       ctx.scale(this.facing * scaleFactor, scaleFactor);
+      // 抓取"仅含平移+镜像缩放"的变换，供文字正向绘制使用（姿态旋转发生在之后，不进来）
+      this._textCTM = ctx.getTransform ? ctx.getTransform() : null;
 
       // 特殊姿态全局几何形变 (爬树90度 / 空中起跳俯冲 / 抱腿长条拉伸)
-      if (this.state === 'climbing') {
-        ctx.rotate(-Math.PI / 2);
-        ctx.scale(1.08, 0.90);
+      // 爬树用 _climbBlend 平滑过渡，避免进出状态时姿态瞬间硬切
+      const climbBlend = this._climbBlend || 0;
+      if (climbBlend > 0.001) {
+        ctx.rotate(-Math.PI / 2 * climbBlend);
+        ctx.scale(lerp(1, 1.08, climbBlend), lerp(1, 0.90, climbBlend));
       } else if (this.state === 'jumping' || this.state === 'pouncing' || this.state === 'aerial_pounce_drop') {
         const leapAngle = Math.atan2(this.vy, Math.abs(this.vx) + 0.1) * 0.38;
         ctx.rotate(leapAngle);
@@ -1313,7 +1349,7 @@
 
       // 4. 尾巴绘制 (锚定在十字部 s0)
       if (!this.inBox) {
-        this._drawTail(ctx, { x: s0.x + 2, y: s0.y - 3 }, hipRoll);
+        this._drawTail(ctx, { x: s0.x + 2, y: s0.y - 3 }, hipRoll, this.state === 'climbing');
       }
 
       // 5. 远端四肢绘制 (母鸡蹲时收于体底，跳过绘制)
@@ -1323,10 +1359,19 @@
         const lift = (isTrot ? 15.5 : 12.0) * lerp(0.74, 1.0, age);
         const hindCenter = -baseBodyLen * 0.52;
         const frontCenter = baseBodyLen * 0.54;
-        legBL = this._dampLeg(0, this._computeHindLeg({ x: hip.x + 1, y: hip.y - 1 }, gBL, hindCenter - 2, stride, lift, legScale, isWalk), dt);
-        legFL = this._dampLeg(1, this._computeFrontLeg({ x: sh.x - 3, y: sh.y + 2 }, gFL, frontCenter - 2, stride, lift, legScale, isWalk), dt);
-        legBR = this._dampLeg(2, this._computeHindLeg({ x: hip.x + 5, y: hip.y - 1 }, gBR, hindCenter + 2, stride, lift, legScale, isWalk), dt);
-        legFR = this._dampLeg(3, this._computeFrontLeg({ x: sh.x + 1, y: sh.y + 3 }, gFR, frontCenter + 2, stride, lift, legScale, isWalk), dt);
+        const isClimb = this.state === 'climbing';
+        legBL = this._dampLeg(0, isClimb
+          ? this._computeClimbLeg({ x: hip.x + 1, y: hip.y - 1 }, 0, hindCenter - 2, legScale)
+          : this._computeHindLeg({ x: hip.x + 1, y: hip.y - 1 }, gBL, hindCenter - 2, stride, lift, legScale, isWalk), dt);
+        legFL = this._dampLeg(1, isClimb
+          ? this._computeClimbLeg({ x: sh.x - 3, y: sh.y + 2 }, Math.PI, frontCenter - 2, legScale)
+          : this._computeFrontLeg({ x: sh.x - 3, y: sh.y + 2 }, gFL, frontCenter - 2, stride, lift, legScale, isWalk), dt);
+        legBR = this._dampLeg(2, isClimb
+          ? this._computeClimbLeg({ x: hip.x + 5, y: hip.y - 1 }, Math.PI, hindCenter + 2, legScale)
+          : this._computeHindLeg({ x: hip.x + 5, y: hip.y - 1 }, gBR, hindCenter + 2, stride, lift, legScale, isWalk), dt);
+        legFR = this._dampLeg(3, isClimb
+          ? this._computeClimbLeg({ x: sh.x + 1, y: sh.y + 3 }, 0, frontCenter + 2, legScale)
+          : this._computeFrontLeg({ x: sh.x + 1, y: sh.y + 3 }, gFR, frontCenter + 2, stride, lift, legScale, isWalk), dt);
 
         this._drawLegMesh(ctx, legBL, true, true, mid.y);
         this._drawLegMesh(ctx, legFL, false, true, mid.y);
@@ -1481,14 +1526,15 @@
       }
 
       // 9. 3/4 雕塑微观猫头与面部
-      const bodyHeadR = lerp(30.5, 25.5, age);
+      const bodyHeadR = lerp(34.5, 29.5, age); // 头身比放大，幼态可爱
       this._drawHead(ctx, neckTop.x + 9, neckTop.y - 3 - lerp(3, 0, age), bodyHeadR, furPattern);
 
-      // 10. 名字标签
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-      ctx.font = '10px -apple-system, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(this.name, neckTop.x + 9, neckTop.y - bodyHeadR - 10);
+      // 10. 名字标签（正向绘制：抵消 facing 镜像与爬树旋转）
+      this._drawUprightText(ctx, () => {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.font = '10px -apple-system, sans-serif';
+        ctx.fillText(this.name, (neckTop.x + 9) * this.facing, neckTop.y - bodyHeadR - 10);
+      });
 
       // 11. 喵语同传气泡与战术大计徽章
       if (this.bubbleTimer > 0 && this.bubbleText) {
@@ -1552,7 +1598,7 @@
         }
         this.perchedTier = null;
         this.grabStretch = MathUtils.lerp(this.grabStretch, 1.55, 0.12);
-        this.tailChain.update(this.x, this.y + this.radius * 1.4, 0.35, 0.85);
+        this.tailChain.update(this.x, this.y + this.radius * 1.4, 0.35, 0.85, frameStep);
         return;
       } else {
         this.grabStretch = MathUtils.lerp(this.grabStretch, 1.0, 0.18);
@@ -1622,6 +1668,9 @@
       }
 
       this.loafBreathe += dt * 2.2;
+      // 爬树姿态平滑：用与骨骼平滑相同的时间常数逼近目标，进出 climbing 不再瞬间翻转
+      const climbTarget = this.state === 'climbing' ? 1 : 0;
+      this._climbBlend = lerp(this._climbBlend, climbTarget, 1 - Math.exp(-11 * dt));
       this.climbCycle += dt * 6.0;
       this.kneadCycle += dt * 3.5;
       if (this.state === 'stalking' || this.state === 'aerial_pounce_aim') {
@@ -1667,10 +1716,10 @@
         const floor = physicsWorld.getFloorY(height) - this.radius;
 
         if (this.state === 'climbing') {
-          // 真实爬树：抱柱匀速向上攀爬
+          // 真实爬树：抱柱匀速向上攀爬（按帧步长缩放，速度上限量纲保持 @60fps）
           this.vx = 0;
           this.vy = -3.2;
-          this.y += this.vy;
+          this.y += this.vy * frameStep;
           if (Math.random() < 0.25 && sceneContext?.spawnParticle) {
             sceneContext.spawnParticle(this.x + this.facing * 8, this.y - 10, '🪵✨');
           }
@@ -1678,18 +1727,18 @@
             soundEngine.playScratch();
           }
         } else {
-          this.vy += gravity;
+          this.vy += gravity * frameStep;
           const drag = physicsWorld.isZeroG() ? 0.985 : (this.state === 'zoomies' ? 0.97 : 0.92);
-          this.vx *= drag;
-          this.vy *= physicsWorld.isZeroG() ? 0.985 : 0.99;
+          this.vx *= Math.pow(drag, frameStep);
+          this.vy *= Math.pow(physicsWorld.isZeroG() ? 0.985 : 0.99, frameStep);
 
           const maxSpeed = this.state === 'zoomies' ? 11.5 : (this.state === 'pouncing' || this.state === 'jumping' || this.state === 'aerial_pounce_drop' ? 9.5 : 4.5);
           this.vx = MathUtils.clamp(this.vx, -maxSpeed, maxSpeed);
           // 纵向速度极限解禁 (高达 16px/frame，赋予猫咪高达 450px+ 的弹跳腾空力)
           this.vy = MathUtils.clamp(this.vy, -16.0, 16.0);
 
-          this.x += this.vx;
-          this.y += this.vy;
+          this.x += this.vx * frameStep;
+          this.y += this.vy * frameStep;
 
           // 检查墙壁跳台、猫爬架各层高台、空中悬索桥与全景吊床
           let landedOnPerch = false;
@@ -1856,7 +1905,7 @@
       // 尾巴骨骼更新
       const tailRootX = this.x - this.facing * this.radius * 0.75;
       const tailRootY = this.y - 2;
-      this.tailChain.update(tailRootX, tailRootY, 0.28, 0.88);
+      this.tailChain.update(tailRootX, tailRootY, 0.28, 0.88, frameStep);
     }
 
     // 状态机核心分支与优先级调度
@@ -2503,7 +2552,8 @@
             this.state = 'walking';
             this.vx = this.facing * 2.2;
           } else {
-            this.x = trunkX;
+            // 贴柱一侧而非钉在柱心，避免钻进剑麻柱内部（柱半宽约 12px）
+            this.x = trunkX - this.facing * (12 + this.radius * 0.5);
             this.vx = 0;
             this.agendaPhase = 1;
             this.state = 'scratcher';

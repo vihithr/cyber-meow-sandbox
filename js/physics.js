@@ -38,16 +38,18 @@
       }
     }
 
-    update(rootX, rootY, gravityY = 0.08, airResistance = 0.94) {
+    update(rootX, rootY, gravityY = 0.08, airResistance = 0.94, step = 1) {
       // 锚定根节点
       this.points[0].x = rootX;
       this.points[0].y = rootY;
 
-      // Verlet 积分计算其他节点
+      // Verlet 积分计算其他节点：阻尼按 step 次幂，加速度作用于位移需 step²
+      const damp = Math.pow(airResistance, step);
+      const accel = gravityY * step * step;
       for (let i = 1; i < this.points.length; i++) {
         const p = this.points[i];
-        const vx = (p.x - p.oldX) * airResistance;
-        const vy = (p.y - p.oldY) * airResistance + gravityY;
+        const vx = (p.x - p.oldX) * damp;
+        const vy = (p.y - p.oldY) * damp + accel;
         p.oldX = p.x;
         p.oldY = p.y;
         p.x += vx;

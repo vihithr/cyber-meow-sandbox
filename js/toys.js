@@ -176,7 +176,8 @@
       this.x += this.vx * step;
       this.y += this.vy * step;
 
-      const floor = physicsWorld.getFloorY(height) - 8;
+      // 用真实半径做地板基准，避免鱼干下缘穿地（radius=12 时旧值 -8 会穿 4px）
+      const floor = physicsWorld.getFloorY(height) - (Number.isFinite(this.radius) ? this.radius : 12);
       if (this.y > floor) {
         this.y = floor;
         this.vy = -this.vy * 0.3;
@@ -349,11 +350,11 @@
       this.colors = ['#ff4757', '#ffa502', '#2ed573'];
     }
 
-    update(mouseX, mouseY) {
+    update(mouseX, mouseY, step = 1) {
       if (!this.active) return;
       this.targetX = mouseX;
       this.targetY = mouseY;
-      this.chain.update(mouseX, mouseY, 0.25, 0.91);
+      this.chain.update(mouseX, mouseY, 0.25, 0.91, step);
     }
 
     getTip() {

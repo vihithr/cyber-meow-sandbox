@@ -155,7 +155,9 @@ python cyber-meow-sandbox/server.py
 ```powershell
 node cyber-meow-sandbox/tests/verify.js
 ```
-当前共 94 项真实断言，失败时以退出码 1 结束。
+当前共 95 项真实断言，失败时以退出码 1 结束。
+
+本轮基于无头 Chrome 真实渲染截图与六代理专家团诊断，修复了镜像文字倒转、爬树四爪定格与穿柱、扫地机推箱碰撞、小鱼干穿地、帧率解耦，并做了猫可爱化、猫爬架加高与家具建模升级；详见 [docs/ENGINEERING.md](docs/ENGINEERING.md) 第 5.6 节。
 
 ### 快捷键
 `1`–`0` 切换工具，`A/D` 或方向键平移镜头，`空格` 反重力，`M` 全体猫叫，`P` 拍照，**`C` 喵视角**（镜头跟随一只猫，把自己当成猫），**`Q` 手动画质**（高 / 均衡 / 流畅循环）。

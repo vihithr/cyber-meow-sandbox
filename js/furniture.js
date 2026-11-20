@@ -65,20 +65,44 @@
       ctx.closePath();
       ctx.fill();
 
-      // 跳台实木板
-      ctx.fillStyle = '#deb887';
+      // 跳台实木板：竖向木纹渐变 + 顶部高光，按尺寸缓存
+      if (!this._plankGrad || this._plankKey !== `${this.w}_${this.h}`) {
+        const g = ctx.createLinearGradient(0, -4, 0, this.h + 2);
+        g.addColorStop(0, '#f0d3a8');
+        g.addColorStop(0.35, '#deb887');
+        g.addColorStop(1, '#b9844f');
+        this._plankGrad = g;
+        this._plankKey = `${this.w}_${this.h}`;
+      }
+      ctx.fillStyle = this._plankGrad;
       ctx.beginPath();
       ctx.roundRect(-this.w / 2, 0, this.w, this.h, [5]);
       ctx.fill();
       ctx.strokeStyle = '#a0522d';
       ctx.lineWidth = 1.5;
       ctx.stroke();
+      // 木纹细线 + 两端铆钉
+      ctx.strokeStyle = 'rgba(150, 100, 55, 0.35)';
+      ctx.lineWidth = 0.8;
+      for (let gx = -this.w / 2 + 12; gx < this.w / 2 - 6; gx += 14) {
+        ctx.beginPath();
+        ctx.moveTo(gx, 2);
+        ctx.lineTo(gx + 3, this.h - 2);
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#8b6b45';
+      ctx.beginPath();
+      ctx.arc(-this.w / 2 + 7, this.h / 2, 1.8, 0, Math.PI * 2);
+      ctx.arc(this.w / 2 - 7, this.h / 2, 1.8, 0, Math.PI * 2);
+      ctx.fill();
 
       // 柔软绒布软垫
       ctx.fillStyle = '#ffb8b8';
       ctx.beginPath();
       ctx.roundRect(-this.w / 2 + 8, -4, this.w - 16, 5, [3]);
       ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.fillRect(-this.w / 2 + 12, -4, this.w - 24, 1.5);
 
       ctx.restore();
     }
@@ -255,24 +279,32 @@
       }
 
       // 物理推力碰撞：撞击推开挡路的毛线球与纸箱！
+      // 用「圆(扫地机) vs AABB(道具)」真实最近点判距；接触期间只在进入那一帧施加一次冲量，
+      // 避免 t.vx 每帧累加导致道具被弹飞。
       if (sceneContext && sceneContext.toys) {
         for (let t of sceneContext.toys) {
           // 水洼等静态道具不参与物理推撞；过期对象直接跳过
           if (!t || t.type === 'puddle' || (t.isExpired && t.isExpired())) continue;
-          const dx = t.x - this.x;
-          const dy = t.y - this.y;
+          const halfW = (Number.isFinite(t.w) ? t.w : (Number.isFinite(t.radius) ? t.radius * 2 : 30)) / 2;
+          const halfH = (Number.isFinite(t.h) ? t.h : halfW * 2) / 2;
+          const closestX = Math.max(t.x - halfW, Math.min(this.x, t.x + halfW));
+          const closestY = Math.max(t.y - halfH, Math.min(this.y, t.y + halfH));
+          const dx = this.x - closestX;
+          const dy = this.y - closestY;
           const dist = Math.hypot(dx, dy);
-          const radius = Number.isFinite(t.radius) ? t.radius : (Number.isFinite(t.w) ? t.w / 2 : 15);
-          const minD = this.radius + radius;
-          if (dist < minD && dist > 1) {
-            // 将道具弹开推走！
-            const pushForce = Math.sign(this.vx) * 3.5;
+          const touching = dist < this.radius;
+          if (touching && t._pushedBy !== this) {
+            // 将道具弹开推走（仅在进入接触的那一帧）
+            const pushForce = Math.sign(this.vx || 1) * 3.5;
             t.vx += pushForce;
             t.vy -= 1.8;
+            t._pushedBy = this;
             this.bump();
             if (t.type === 'yarn' && window.CyberMeow.soundEngine) {
               window.CyberMeow.soundEngine.playBounce();
             }
+          } else if (!touching && t._pushedBy === this) {
+            t._pushedBy = null; // 分离后清除，下次接触可再次推
           }
         }
       }
@@ -357,13 +389,18 @@
       this.x = x;
       this.y = y;
       this.width = 130;
+      // 猫爬架加高：随视口高度自适应，顶层高于 WallPerch(-240) 与吊床(-320) 区间，
+      // 让"征服顶层王座"真正成为全屋最高点。所有几何（柱子/吊球/落脚面）由 tier 偏移推导。
+      const topRise = Math.min(360, Math.max(240, y - 200));
+      const midRise = Math.round(topRise * 0.5);
+      this.postTop = -topRise;
       this.tiers = [
-        { index: 0, tree: this, yOffset: -110, xOffset: -22, w: 90, h: 14, occupant: null, name: '下层跳台' },
-        { index: 1, tree: this, yOffset: -210, xOffset: 22, w: 85, h: 14, occupant: null, name: '顶层王座' }
+        { index: 0, tree: this, yOffset: -midRise, xOffset: -22, w: 90, h: 14, occupant: null, name: '下层跳台' },
+        { index: 1, tree: this, yOffset: -topRise, xOffset: 22, w: 85, h: 14, occupant: null, name: '顶层王座' }
       ];
       this.dangleBall = {
         x: x + 40,
-        y: y - 160,
+        y: y - Math.round(topRise * 0.67),
         vy: 0,
         vx: 0,
         color: '#ff4757',
@@ -421,7 +458,7 @@
       this.dangleBall.y += this.dangleBall.vy * step;
 
       const anchorX = this.x + 40;
-      const anchorY = this.y - 200;
+      const anchorY = this.y + this.tiers[1].yOffset + 80;
       const dx = this.dangleBall.x - anchorX;
       const dy = this.dangleBall.y - anchorY;
       const dist = Math.hypot(dx, dy);
@@ -444,17 +481,35 @@
       ctx.strokeStyle = '#8b5a2b';
       ctx.strokeRect(-this.width / 2, -18, this.width, 18);
 
-      // 麻绳立柱
-      ctx.fillStyle = '#e8d8b8';
-      ctx.fillRect(-12, -210, 24, 192);
-      ctx.strokeStyle = '#c2a677';
+      // 麻绳立柱（高度随 tier 顶层偏移推导，不再硬编码）
+      const postTop = this.postTop || this.tiers[1].yOffset;
+      // 圆柱体渐变（左暗右亮）按高度缓存，避免每帧 createLinearGradient
+      if (!this._postGrad || this._postGradTop !== postTop) {
+        const g = ctx.createLinearGradient(-12, 0, 12, 0);
+        g.addColorStop(0, '#c9b28d');
+        g.addColorStop(0.42, '#f0e2c4');
+        g.addColorStop(1, '#b99f74');
+        this._postGrad = g;
+        this._postGradTop = postTop;
+      }
+      ctx.fillStyle = this._postGrad;
+      ctx.fillRect(-12, postTop, 24, -postTop - 18);
+      // 交错绳纹
+      ctx.strokeStyle = 'rgba(160, 130, 90, 0.55)';
       ctx.lineWidth = 1;
-      for (let py = -210; py < -18; py += 8) {
+      for (let py = postTop; py < -18; py += 8) {
         ctx.beginPath();
         ctx.moveTo(-12, py);
         ctx.lineTo(12, py + 2);
         ctx.stroke();
       }
+      // 顶/底金属箍，增加材质层次
+      ctx.fillStyle = '#9b7b52';
+      ctx.fillRect(-13, postTop, 26, 5);
+      ctx.fillRect(-13, -22, 26, 5);
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.fillRect(-13, postTop, 26, 1.5);
+      ctx.fillRect(-13, -22, 26, 1.5);
 
       // 各层平台
       this.tiers.forEach((tier, idx) => {

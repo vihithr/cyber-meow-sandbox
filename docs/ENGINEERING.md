@@ -76,9 +76,27 @@ CyberMeow 是一个零外部依赖的桌面猫咪物理沙盒，使用原生 HTM
 - **逃逸可审计**：`app.js` 中直写 `soundEngine.bgmEnabled` 与 `physicsWorld.gravityMode` 两处补 `@escape H4` 标记，落实 H3/H4/D3 裁决；不封死字段、不改变运行时行为。
 - **画质手动锁定**：按 `Q` 后设 `_qualityLocked`，`_updateRenderQuality` 早退，自适应不再在帧率回升时把 low 偷偷切回 high。默认仍自动；只有按过 `Q` 才锁定，使"切 low 做性能对照"成为可靠测量手段。
 
+## 5.6 业务设计修复（2026-11-20，专家团深度分析后实施）
+
+六代理专家团结合无头 Chrome **真实渲染截图**而非仅 Node mock 做诊断，实施以下修复：
+
+**确定 bug**
+
+- **镜像文字倒转**：`ctx.scale(facing*scaleFactor)` 之后的名字、气泡、战术徽章三处 `fillText` 会随猫左右翻转而镜像。新增 `_drawUprightText`，用 `render()` 抓取的 `textCTM`（仅平移+缩放，不含姿态旋转）重置矩阵再反向抵消 `facing`；同时修复爬树时文字随躯干旋转 90° 的问题。`tests/dom-mock.js` 增加真实变换矩阵追踪（含 save/restore 栈），使此类 bug 可被自动测试捕获。
+- **爬树动作**：`climbCycle` 原本只初始化和递增、不驱动四爪，导致四爪定格；身体中心钉在柱心穿模；姿态进出瞬间硬切。新增 `_computeClimbLeg` 用 `climbCycle` 对角交替驱动抓握，尾巴加 climbing 下垂分支，进入爬树时贴柱一侧，`_climbBlend` 指数平滑姿态。
+- **碰撞判定**：扫地机推箱用圆半径当 AABB 的 `w/2`、且接触期间逐帧累加冲量导致道具被弹飞。改为圆 vs AABB 最近点判距，`_pushedBy` 标记只在进入接触那一帧施力。小鱼干地板基准由 `-8` 改为真实 radius，消除穿地 4px。
+- **帧率解耦补全**：猫主运动积分（重力/阻尼/位移）、Verlet 链（`update` 新增 step 参数，加速度按 step²）也纳入 `frameStep`，与上一轮的家具/玩具统一。速度上限保持 @60fps 量纲不变，避免与弹道计算失配。
+- **ECS 结论**：Canvas 2D 是立即模式 API，规范无 JS 可用的实例化渲染；ECS 只优化 CPU 数据布局，不减少 draw call 或填充率，且不修复任何用户抱怨的问题。维持不迁移。
+
+**审美改动（程序化绘制）**
+
+- **猫可爱化**：`eyeSize` 0.205→0.26、压眼皮系数 0.52→0.28、`bodyHeadR` 30.5→34.5、下颚 `R*0.84→R*0.70`、耳高 `R*0.84→R*0.66` 且耳尖圆钝、胡须更短更柔。无新增 draw call。
+- **猫爬架加高**：顶层由固定 `-210` 改为随视口自适应 `topRise = clamp(y-200, 240, 360)`，柱子/吊球锚点/落脚面全部由 tier 偏移推导，不再硬编码漂移。
+- **家具建模升级**：猫爬架麻绳柱加圆柱渐变（按高度缓存）+ 金属箍，跳台实木板加木纹渐变 + 铆钉 + 高光，均按实例缓存避免每帧 `createLinearGradient`。
+
 ## 6. 测试体系
 
-测试入口为 `node tests/verify.js`，共 **94 项断言**，失败以退出码 1 结束。文件构成：
+测试入口为 `node tests/verify.js`，共 **95 项断言**，失败以退出码 1 结束。文件构成：
 
 - `tests/verify.js`：语法编译、核心逻辑、外部新特性行为链断言。
 - `tests/dom-mock.js`：最小浏览器 API 桩。canvas 2D 上下文用 Proxy 兜底，`requestAnimationFrame` 只登记回调、不自动执行，因此 `app.init()` 的主循环不会在测试中跑飞，可由测试手动推进单帧；另提供 `pathOps`/`drawImages` 计数器供基准使用。

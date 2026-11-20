@@ -434,7 +434,7 @@
         this.laser.x = pos.x;
         this.laser.y = pos.y;
 
-        featherWand.update(pos.x, pos.y);
+        featherWand.update(pos.x, pos.y, Math.min((this.dt || 1 / 60) * 60, 3));
 
         // 拖拽抓起的猫咪
         if (this.mouse.draggedCat) {
