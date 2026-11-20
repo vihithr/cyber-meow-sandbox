@@ -66,15 +66,25 @@ CyberMeow 是一个零外部依赖的桌面猫咪物理沙盒，使用原生 HTM
 - **指针边界坐标**：`getWorldPos` 改用 `??` 读取 `clientX/clientY`，`0` 不再被当作缺失值回退到不存在的 `touches`。此前点击画布顶边／左边会把 `NaN` 带入世界坐标，经毛线球持有链污染道具位置，使道具在 Canvas 上静默消失。该问题由 3000 帧压力仿真复现并加入回归断言。
 - **视觉体型**：`CAT_VISUAL_SCALE_DENOM` 从 24 经 34 调整到 44，使设计稿约 96px 的身长在缩放后接近 44～52px 的碰撞直径；物理半径、交互判定与存档不受影响。
 
+## 5.5 基于架构评审的后续优化（2026-11-20）
+
+架构评审报告（`docs/ARCHITECTURE_REVIEW.md`）指出的问题中，以下四项已实施，语义轴决策见 `docs/ADR-001-semantic-axis.md`：
+
+- **吊桥可达性**：`CatSuspensionBridge.type` 实际为 `bridge`，但 `cat.js` 用 `suspension_bridge` 判定，导致 `onBridge` 恒为 false、吊桥对决与空降目标分支不可达。统一为 `bridge` 后，这些行为在真实运行中可被触发。
+- **渐变缓存泄漏**：远眼宝石渐变 key 含 `rx.toFixed(2)`，而 `rx` 随头部转动逐帧变化，长时间会话会让 `_gradCache` 单调增长。改为固定基准半径建渐变、绘制时用 scale 适配，key 仅依赖虹膜色；另设 64 条容量上限作防御。
+- **帧率一致性**：`toys.js` 与 `furniture.js` 的物理积分改用 `sceneContext.dt` 推导的帧步长，阻尼按 `Math.pow(阻尼, step)` 缩放；60fps 时行为与原先一致，其他刷新率下物理演化速度不再随帧率漂移。未传 `sceneContext` 的旧调用退化为 step=1。
+- **逃逸可审计**：`app.js` 中直写 `soundEngine.bgmEnabled` 与 `physicsWorld.gravityMode` 两处补 `@escape H4` 标记，落实 H3/H4/D3 裁决；不封死字段、不改变运行时行为。
+
 ## 6. 测试体系
 
-测试入口为 `node tests/verify.js`，共 **86 项断言**，失败以退出码 1 结束。文件构成：
+测试入口为 `node tests/verify.js`，共 **93 项断言**，失败以退出码 1 结束。文件构成：
 
 - `tests/verify.js`：语法编译、核心逻辑、外部新特性行为链断言。
 - `tests/dom-mock.js`：最小浏览器 API 桩。canvas 2D 上下文用 Proxy 兜底，`requestAnimationFrame` 只登记回调、不自动执行，因此 `app.init()` 的主循环不会在测试中跑飞，可由测试手动推进单帧；另提供 `pathOps`/`drawImages` 计数器供基准使用。
 - `tests/runtime.js`：在独立 VM 中按依赖顺序真实加载全部 8 个模块并触发 `DOMContentLoaded`，覆盖 `environment.js`、`ui.js`、`app.js` 的运行时行为、环境渐变缓存、天气上限、红点目标边界、护照/快照交互、实体上限、DPR、视口裁剪与离屏缓存失效条件、存档往返、喵视角、自适应画质与手动 Q 切换。
 - `tests/bench.js`：可复现性能基准（`node tests/bench.js`，可用 `BENCH_FRAMES` 覆盖帧数）。输出每帧渐变创建数、路径操作数、drawImage 次数与 JS 耗时，high/low 两档对比，不设阈值断言。
 - `tests/soak.js`：压力与鲁棒性断言。从源码提取全部 22 个状态逐一渲染，并用绘制参数守卫把 Canvas 静默吞掉的 NaN 变成失败；以可控 rAF 时钟推进 3000 帧随机工具切换／点击／天气切换仿真，检查坐标、速度、生理值、实体上限与 rAF 队列；另含异常 dt、画布边界 0 坐标与视觉体型的回归用例。
+- `tests/architecture.js`：架构门禁。机械检查公共契约面可枚举、已观测逃逸点的 `@escape H4` 标记、bridge 类型字符串一致、渐变 key 无动态 `toFixed`、物理积分统一走 `sceneContext.dt`；每个守卫附反例注入，确认违规写法会被门禁拒绝（反模式 #7）。
 
 最终实测（Node v24.15.0，300 帧，1920×1080，DPR=2）：
 

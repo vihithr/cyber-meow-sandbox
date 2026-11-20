@@ -505,6 +505,9 @@
     _cachedGradient(key, ctx, factory) {
       let g = this._gradCache.get(key);
       if (g === undefined) {
+        // 防御性上限：正常 key 均为静态组合，远低于此值；若未来误加动态 key，
+        // 超限时整体清空而非无限增长，避免长时间会话的 Map 泄漏。
+        if (this._gradCache.size >= 64) this._gradCache.clear();
         g = factory(ctx);
         this._gradCache.set(key, g);
       }
@@ -769,19 +772,24 @@
         ctx.fillStyle = irisColor;
         ctx.fillRect(-rx * 1.3, -ry * 1.3, rx * 2.6, ry * 2.6);
       } else {
-        // 渐变以眼球中心为原点缓存；注视点 gx/gy 用临时平移抵消，视觉与原版完全一致
+        // 渐变以固定基准半径创建，key 只依赖虹膜色；rx/ry 由绘制时的 scale 适配。
+        // 远眼 rx 随头部转动逐帧变化，若纳入 key 会让 _gradCache 无限增长；此处固定 key 消除泄漏。
+        const GEM_BASE = 10;
+        const sx = rx / GEM_BASE;
+        const sy = ry / GEM_BASE;
         ctx.save();
-        ctx.translate(gx, gy);
-        ctx.fillStyle = this._cachedGradient(
-          'gem_' + rx.toFixed(2) + '_' + ry.toFixed(2) + '_' + irisColor, ctx, (c) => {
-            const grad = c.createRadialGradient(0, ry * 0.22, rx * 0.12, 0, 0, ry * 1.18);
-            grad.addColorStop(0, '#fff7cc');
-            grad.addColorStop(0.26, irisColor);
-            grad.addColorStop(0.80, irisColor);
-            grad.addColorStop(1, '#10161e');
-            return grad;
-          });
-        ctx.fillRect(-rx * 1.3 - gx, -ry * 1.3 - gy, rx * 2.6, ry * 2.6);
+        ctx.scale(sx, sy);
+        // scale 后再平移：实际世界偏移 = (gx, gy)，与原版的 translate(gx,gy) 等价
+        ctx.translate(gx / sx, gy / sy);
+        ctx.fillStyle = this._cachedGradient('gem_' + irisColor, ctx, (c) => {
+          const grad = c.createRadialGradient(0, GEM_BASE * 0.22, GEM_BASE * 0.12, 0, 0, GEM_BASE * 1.18);
+          grad.addColorStop(0, '#fff7cc');
+          grad.addColorStop(0.26, irisColor);
+          grad.addColorStop(0.80, irisColor);
+          grad.addColorStop(1, '#10161e');
+          return grad;
+        });
+        ctx.fillRect(-GEM_BASE * 1.3, -GEM_BASE * 1.3, GEM_BASE * 2.6, GEM_BASE * 2.6);
         ctx.restore();
       }
 
@@ -1702,7 +1710,7 @@
                     this.vx *= 0.82;
                     this.perchedTier = s.id;
                     // 同步桥面落脚状态：只有真正落在悬索桥上才记为 onBridge（值为桥对象）
-                    this.onBridge = (f.type === 'suspension_bridge') ? f : false;
+                    this.onBridge = (f.type === 'bridge') ? f : false;
                     landedOnPerch = true;
                     if (this.state === 'jumping' || this.state === 'aerial_pounce_drop') {
                       this.state = 'idle';
@@ -2461,7 +2469,7 @@
       const tree = furniture.find(f => f.type === 'cattree');
       if (tree) candidates.push({ agenda: AGENDAS.TREE_CLIMB, target: tree, weight: 35 });
 
-      const bridge = furniture.find(f => f.type === 'suspension_bridge');
+      const bridge = furniture.find(f => f.type === 'bridge');
       if (bridge) candidates.push({ agenda: AGENDAS.AERIAL_PATROL, target: bridge, weight: 30 });
 
       const feeder = furniture.find(f => f.type === 'smart_feeder');

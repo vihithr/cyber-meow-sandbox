@@ -7,6 +7,13 @@
 
   const { MathUtils, VerletChain, physicsWorld } = window.CyberMeow;
 
+  // 帧率无关步长：从 app 已传入的 sceneContext.dt 推导，60fps 时为 1。
+  // 上层 dt 已钳制在 1/1000~0.05，这里再限 3 防极端跳变；旧调用不传 scene 时退化为 1，行为不变。
+  const frameStep = (scene) => {
+    const dt = scene && typeof scene.dt === 'number' && scene.dt > 0 ? scene.dt : 1 / 60;
+    return Math.min(dt * 60, 3);
+  };
+
   // 1. 弹性毛线球 (带解体散线与缠绕物理)
   class YarnBall {
     constructor(x, y, customRadius = 16, customColor = null) {
@@ -25,7 +32,8 @@
       this.dropThreadCooldown = 0;
     }
 
-    update(width, height) {
+    update(width, height, sceneContext) {
+      const step = frameStep(sceneContext);
       if (this.heldBy) {
         // 如果被猫咪抱住疯狂蹬球，跟随猫咪胸前，不自行物理弹跳
         this.x = this.heldBy.x + this.heldBy.facing * 12;
@@ -36,14 +44,14 @@
       }
 
       const gravity = physicsWorld.getGravity();
-      this.vy += gravity;
+      this.vy += gravity * step;
 
-      this.vx *= physicsWorld.isZeroG() ? 0.99 : 0.985;
-      this.vy *= physicsWorld.isZeroG() ? 0.99 : 0.99;
+      this.vx *= Math.pow(physicsWorld.isZeroG() ? 0.99 : 0.985, step);
+      this.vy *= Math.pow(0.99, step);
 
-      this.x += this.vx;
-      this.y += this.vy;
-      this.rotation += this.vx * 0.08;
+      this.x += this.vx * step;
+      this.y += this.vy * step;
+      this.rotation += this.vx * 0.08 * step;
 
       // 拖尾记录
       if (Math.hypot(this.vx, this.vy) > 0.4) {
@@ -148,7 +156,8 @@
       this.radius = 12;
     }
 
-    update(width, height) {
+    update(width, height, sceneContext) {
+      const step = frameStep(sceneContext);
       if (this.heldBy) {
         // 如果被猫咪抱住疯狂蹬球，跟随猫咪胸前，不自行物理弹跳
         this.x = this.heldBy.x + this.heldBy.facing * 12;
@@ -159,13 +168,13 @@
       }
 
       const gravity = physicsWorld.getGravity();
-      this.vy += gravity;
+      this.vy += gravity * step;
 
-      this.vx *= physicsWorld.isZeroG() ? 0.99 : 0.96;
-      this.vy *= physicsWorld.isZeroG() ? 0.99 : 0.98;
+      this.vx *= Math.pow(physicsWorld.isZeroG() ? 0.99 : 0.96, step);
+      this.vy *= Math.pow(physicsWorld.isZeroG() ? 0.99 : 0.98, step);
 
-      this.x += this.vx;
-      this.y += this.vy;
+      this.x += this.vx * step;
+      this.y += this.vy * step;
 
       const floor = physicsWorld.getFloorY(height) - 8;
       if (this.y > floor) {
@@ -235,6 +244,7 @@
     }
 
     update(width, height, sceneContext) {
+      const step = frameStep(sceneContext);
       if (this.heldBy) {
         // 如果被猫咪抱住疯狂蹬球，跟随猫咪胸前，不自行物理弹跳
         this.x = this.heldBy.x + this.heldBy.facing * 12;
@@ -246,7 +256,7 @@
       }
 
       const gravity = physicsWorld.getGravity();
-      this.vy += gravity;
+      this.vy += gravity * step;
 
       if (this.isArmoredTank) {
         this.tankTimer--;
@@ -258,11 +268,11 @@
         this.wigglePhase = 0;
       }
 
-      this.vx *= this.isArmoredTank ? 0.96 : 0.88;
-      this.vy *= 0.98;
+      this.vx *= Math.pow(this.isArmoredTank ? 0.96 : 0.88, step);
+      this.vy *= Math.pow(0.98, step);
 
-      this.x += this.vx;
-      this.y += this.vy;
+      this.x += this.vx * step;
+      this.y += this.vy * step;
 
       const floor = physicsWorld.getFloorY(height) - this.h / 2;
       if (this.y > floor) {
@@ -437,11 +447,12 @@
 
     update(width, height, sceneContext) {
       if (this.isBroken) return;
+      const step = frameStep(sceneContext);
       const gravity = physicsWorld.getGravity();
-      this.vy += gravity;
-      this.vx *= 0.94;
-      this.x += this.vx;
-      this.y += this.vy;
+      this.vy += gravity * step;
+      this.vx *= Math.pow(0.94, step);
+      this.x += this.vx * step;
+      this.y += this.vy * step;
 
       // 水平边界：避免被打翻后飞出豪宅，导致水洼生成在世界之外
       if (this.x < this.w / 2) { this.x = this.w / 2; this.vx = -this.vx * 0.5; }

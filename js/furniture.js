@@ -8,6 +8,13 @@
   const { MathUtils, physicsWorld } = window.CyberMeow;
   const FEATHER_COLORS = ['#fd79a8', '#a29bfe', '#ffeaa7'];
 
+  // 帧率无关步长：从 app 已传入的 sceneContext.dt 推导，60fps 时为 1。
+  // 上层 dt 已钳制在 1/1000~0.05，这里再限 3 防极端跳变；旧调用不传 scene 时退化为 1，行为不变。
+  const frameStep = (scene) => {
+    const dt = scene && typeof scene.dt === 'number' && scene.dt > 0 ? scene.dt : 1 / 60;
+    return Math.min(dt * 60, 3);
+  };
+
   // 1. 墙面高空跳台 (WallPerch) - 猫咪最爱的高处领地！
   class WallPerch {
     constructor(x, y, w = 120, h = 16) {
@@ -201,11 +208,12 @@
     }
 
     update(width, height, sceneContext) {
+      const step = frameStep(sceneContext);
       // 空降跳杀踢击结算：把外部写入的 spin 消费为机身旋转并逐步衰减；
       // 被踢出的超额速度同步回落到基础巡航速度，避免速度/旋转永久残留。
       if (this.spin > 0) {
-        this.spinAngle += this.spin * 1.6;
-        this.spin *= 0.9;
+        this.spinAngle += this.spin * 1.6 * step;
+        this.spin *= Math.pow(0.9, step);
         if (this.spin < 0.02) this.spin = 0;
         const dir = Math.sign(this.vx) || 1;
         const excess = Math.abs(this.vx) - this.baseVx;
@@ -219,14 +227,14 @@
         let a = this.spinAngle % (Math.PI * 2);
         if (a > Math.PI) a -= Math.PI * 2;
         if (a < -Math.PI) a += Math.PI * 2;
-        this.spinAngle = Math.abs(a) < 0.01 ? 0 : a * 0.85;
+        this.spinAngle = Math.abs(a) < 0.01 ? 0 : a * Math.pow(0.85, step);
       }
 
       const gravity = physicsWorld.getGravity();
-      this.vy += gravity;
+      this.vy += gravity * step;
 
-      this.x += this.vx;
-      this.y += this.vy;
+      this.x += this.vx * step;
+      this.y += this.vy * step;
 
       const floor = physicsWorld.getFloorY(height) - this.height / 2;
       if (this.y > floor) {
@@ -395,7 +403,8 @@
       return this._perchSurfaces;
     }
 
-    update(width, height) {
+    update(width, height, sceneContext) {
+      const step = frameStep(sceneContext);
       const floor = physicsWorld.getFloorY(height);
       this.y = floor;
 
@@ -406,10 +415,10 @@
       });
 
       // 吊绳小球真实 2D 摆动物理
-      this.dangleBall.vx *= 0.96;
-      this.dangleBall.vy += 0.22;
-      this.dangleBall.x += this.dangleBall.vx;
-      this.dangleBall.y += this.dangleBall.vy;
+      this.dangleBall.vx *= Math.pow(0.96, step);
+      this.dangleBall.vy += 0.22 * step;
+      this.dangleBall.x += this.dangleBall.vx * step;
+      this.dangleBall.y += this.dangleBall.vy * step;
 
       const anchorX = this.x + 40;
       const anchorY = this.y - 200;
@@ -772,6 +781,7 @@
     }
 
     update(width, height, sceneContext) {
+      const step = frameStep(sceneContext);
       // 检查桥上是否有猫行走，并计算局部绳桥下沉形变 (Dynamic Bridge Sag)
       let activeCatOnBridge = null;
       if (sceneContext && sceneContext.cats) {
@@ -793,7 +803,7 @@
             targetSag = (1 - distToCat / 55) * 7.5;
           }
         }
-        this.sags[i] += (targetSag - this.sags[i]) * 0.2;
+        this.sags[i] += (targetSag - this.sags[i]) * Math.min(0.2 * step, 1);
         // 无猫时把渐近 0 的浮点尾数直接归零，避免桥面高度长期保留微小偏移
         if (targetSag === 0 && this.sags[i] < 0.05) this.sags[i] = 0;
       }
@@ -922,6 +932,7 @@
     }
 
     update(width, height, sceneContext) {
+      const step = frameStep(sceneContext);
       // 检查是否有猫躺在吊床里
       let hasCat = false;
       if (sceneContext && sceneContext.cats) {
@@ -937,9 +948,9 @@
 
       // 吊床摆动阻尼物理
       const gravityRestore = -0.0035 * Math.sin(this.swayAngle);
-      this.swaySpeed += gravityRestore;
-      this.swaySpeed *= 0.985;
-      this.swayAngle += this.swaySpeed;
+      this.swaySpeed += gravityRestore * step;
+      this.swaySpeed *= Math.pow(0.985, step);
+      this.swayAngle += this.swaySpeed * step;
 
       // 有猫在里面时轻微起伏呼吸感：用帧相位缓慢逼近目标角度，
       // 不直接赋值，避免与上面的弹簧积分相互打断造成视觉跳变
@@ -1120,22 +1131,23 @@
       }
     }
 
-    update(width, height) {
+    update(width, height, sceneContext) {
+      const step = frameStep(sceneContext);
       // 弹力绳谐振与重力阻尼 (Harmonic Spring Physics)
       const k = 0.035; // 弹簧系数
       const damping = 0.95;
       const dy = this.y - this.restY;
       const forceY = -k * dy;
-      this.vy += forceY;
-      this.vy *= damping;
-      this.y += this.vy;
+      this.vy += forceY * step;
+      this.vy *= Math.pow(damping, step);
+      this.y += this.vy * step;
 
       // 水平摆动阻尼
-      this.offsetX += this.vx;
-      this.vx -= this.offsetX * 0.04;
-      this.vx *= 0.95;
+      this.offsetX += this.vx * step;
+      this.vx -= this.offsetX * 0.04 * step;
+      this.vx *= Math.pow(0.95, step);
 
-      this.flutterPhase += 0.08;
+      this.flutterPhase += 0.08 * step;
     }
 
     draw(ctx) {

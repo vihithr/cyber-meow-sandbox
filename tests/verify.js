@@ -673,6 +673,9 @@ registerRuntimeTests({ basePath, fs, vm, assert, test });
 const { registerSoakTests } = require('./soak');
 registerSoakTests({ basePath, fs, vm, assert, test });
 
+const { registerArchitectureTests } = require('./architecture');
+registerArchitectureTests({ basePath, fs, assert, test });
+
 // ---------------------------------------------------------------------------
 // 7. 汇总
 // ---------------------------------------------------------------------------

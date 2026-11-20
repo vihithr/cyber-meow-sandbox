@@ -125,8 +125,16 @@ cyber-meow-sandbox/
 │   ├── environment.js    # 日夜主题、雨滴与微尘萤火虫天气
 │   ├── ui.js             # 身份证、拍立得快照、挑战小游戏
 │   └── app.js            # 核心游戏循环、输入监听与状态协调
+├── docs/
+│   ├── ENGINEERING.md     # 工程约束、优化清单与测试体系
+│   ├── ARCHITECTURE_REVIEW.md  # 专家团架构评审（双边界原理裁决）
+│   └── ADR-001-semantic-axis.md # 语义轴、未来需求与性能架构决策
 └── tests/
-    └── verify.js         # 自动化语法与物理逻辑自检测试
+    ├── verify.js          # 测试入口（93 项断言）
+    ├── runtime.js         # 浏览器环境 mock 下的运行时测试
+    ├── soak.js            # 3000 帧压力仿真与 NaN 守卫
+    ├── architecture.js    # 架构门禁（契约面、H4 标记、帧率一致性，含反例）
+    └── bench.js           # 可复现渲染基准
 ```
 
 ---
@@ -147,7 +155,7 @@ python cyber-meow-sandbox/server.py
 ```powershell
 node cyber-meow-sandbox/tests/verify.js
 ```
-当前共 62 项真实断言，失败时以退出码 1 结束。
+当前共 93 项真实断言，失败时以退出码 1 结束。
 
 ### 快捷键
 `1`–`0` 切换工具，`A/D` 或方向键平移镜头，`空格` 反重力，`M` 全体猫叫，`P` 拍照，**`C` 喵视角**（镜头跟随一只猫，把自己当成猫），**`Q` 手动画质**（高 / 均衡 / 流畅循环）。
@@ -159,4 +167,6 @@ node cyber-meow-sandbox/tests/verify.js
 ## 📚 工程文档与实验
 
 - [docs/ENGINEERING.md](docs/ENGINEERING.md)：模块划分、数据流、设计约束、性能优化与健壮性修复清单、测试体系、已知限制。
+- [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md)：11 代理专家团评审，含 T2 投影、5 条架构裁决、表示层性能痛点与可证伪验证命令。
+- [docs/ADR-001-semantic-axis.md](docs/ADR-001-semantic-axis.md)：语义轴决策、未来需求预测与性能优化的架构取向。
 - [experiments/README.md](experiments/README.md)：ECS/SoA 可行性的独立基准实验与结论（不参与主程序运行，可用 `node --expose-gc experiments/bench.js` 复现）。

@@ -640,6 +640,8 @@
       const bgmBtn = document.getElementById('btn-bgm');
       if (bgmBtn) {
         bgmBtn.onclick = () => {
+          // @escape H4: 直写 soundEngine.bgmEnabled。audio.js 已提供 toggleBGM() 公开方法，
+          // 此处是组合根直控 UI 状态的既有实现。标记使「故意例外」与「意外耦合」可区分（D3/H4）。
           soundEngine.bgmEnabled = !soundEngine.bgmEnabled;
           if (soundEngine.bgmEnabled) {
             soundEngine.startLofiBGM();
@@ -682,6 +684,8 @@
       if (antiBtn) {
         antiBtn.onclick = () => {
           const isZero = physicsWorld.isZeroG();
+          // @escape H4: 直写 physicsWorld.gravityMode。physics.js:125-127 仅暴露 isZeroG() 读接口，
+          // 无公开写接口；组合根按 UI 按钮切换全局重力模式，属有意保留的逃逸点，登记以便审计。
           physicsWorld.gravityMode = isZero ? 'earth' : 'antigravity';
           antiBtn.classList.toggle('special-on', !isZero);
           antiBtn.innerText = !isZero ? '🛸 反重力已激活！' : '🛸 反重力模式';
