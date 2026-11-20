@@ -549,7 +549,9 @@ function registerRuntimeTests(options) {
     const savedEma = app._frameEma;
     const savedSlow = app._slowFrames;
     const savedFast = app._fastFrames;
+    const savedLocked = app._qualityLocked;
     try {
+      app._qualityLocked = false; // 自适应测试需要解锁（Q 键测试会锁定）
       app.renderQuality = 'high';
       app._dprCap = 2;
       app._slowFrames = 0;
@@ -572,6 +574,7 @@ function registerRuntimeTests(options) {
       app._frameEma = savedEma;
       app._slowFrames = savedSlow;
       app._fastFrames = savedFast;
+      app._qualityLocked = savedLocked;
       sandbox.CyberMeow.renderQuality = savedQuality;
       if (app.dpr !== Math.min(3, savedCap)) app.resize();
     }
@@ -618,7 +621,8 @@ function registerRuntimeTests(options) {
   test('手动 Q 键按 高→均衡→流畅→高 循环切换画质并同步 DPR 上限', () => {
     const saved = {
       quality: app.renderQuality, cap: app._dprCap,
-      ema: app._frameEma, slow: app._slowFrames, fast: app._fastFrames
+      ema: app._frameEma, slow: app._slowFrames, fast: app._fastFrames,
+      locked: app._qualityLocked
     };
     const pressQ = () => mock.fire('keydown', {
       target: { tagName: 'CANVAS' }, key: 'q', code: 'KeyQ', preventDefault: noop
@@ -628,6 +632,7 @@ function registerRuntimeTests(options) {
       app._dprCap = 2;
       app._slowFrames = 0;
       app._fastFrames = 0;
+      app._qualityLocked = false;
 
       pressQ();
       assert.strictEqual(app.renderQuality, 'medium', '高→均衡切换失败');
@@ -644,12 +649,52 @@ function registerRuntimeTests(options) {
       assert.strictEqual(app.renderQuality, 'high', '流畅→高循环失败');
       assert.strictEqual(app._dprCap, 2, '高档 DPR 上限未恢复');
       assert.strictEqual(app._frameEma, 14, '高档帧间隔基线错误');
+      assert.strictEqual(app._qualityLocked, true, '按 Q 后未锁定手动档位');
     } finally {
       app.renderQuality = saved.quality;
       app._dprCap = saved.cap;
       app._frameEma = saved.ema;
       app._slowFrames = saved.slow;
       app._fastFrames = saved.fast;
+      app._qualityLocked = saved.locked;
+      sandbox.CyberMeow.renderQuality = saved.quality;
+      app.resize();
+    }
+  });
+
+  test('Q 锁定后自适应画质不再回切（切 low 做性能对照的前提）', () => {
+    const saved = {
+      quality: app.renderQuality, cap: app._dprCap,
+      ema: app._frameEma, slow: app._slowFrames, fast: app._fastFrames,
+      locked: app._qualityLocked
+    };
+    const pressQ = () => mock.fire('keydown', {
+      target: { tagName: 'CANVAS' }, key: 'q', code: 'KeyQ', preventDefault: noop
+    });
+    try {
+      app.renderQuality = 'medium';
+      app._dprCap = 1.25;
+      app._slowFrames = 0;
+      app._fastFrames = 0;
+      app._qualityLocked = false;
+
+      pressQ(); // medium → low，同时锁定
+      assert.strictEqual(app.renderQuality, 'low', '未切到 low');
+      assert.strictEqual(app._qualityLocked, true, 'Q 键未锁定档位');
+
+      // 模拟持续流畅 300 帧：未锁定时 _fastFrames>=180 会升回 high
+      app._frameEma = 10;
+      for (let i = 0; i < 300; i++) app._updateRenderQuality();
+      assert.strictEqual(app.renderQuality, 'low', '锁定后自适应仍回切了档位');
+      assert.strictEqual(sandbox.CyberMeow.renderQuality, 'low', '全局标记被自适应改写');
+      assert.strictEqual(app._fastFrames, 0, '锁定时不应累计升级计数');
+    } finally {
+      app.renderQuality = saved.quality;
+      app._dprCap = saved.cap;
+      app._frameEma = saved.ema;
+      app._slowFrames = saved.slow;
+      app._fastFrames = saved.fast;
+      app._qualityLocked = saved.locked;
       sandbox.CyberMeow.renderQuality = saved.quality;
       app.resize();
     }
@@ -658,9 +703,11 @@ function registerRuntimeTests(options) {
   test('自适应画质：中等慢帧进入均衡档（EMA 22~30）', () => {
     const saved = {
       quality: app.renderQuality, cap: app._dprCap,
-      ema: app._frameEma, slow: app._slowFrames, fast: app._fastFrames
+      ema: app._frameEma, slow: app._slowFrames, fast: app._fastFrames,
+      locked: app._qualityLocked
     };
     try {
+      app._qualityLocked = false; // 自适应测试需要解锁
       app.renderQuality = 'high';
       app._dprCap = 2;
       app._slowFrames = 0;
@@ -676,6 +723,7 @@ function registerRuntimeTests(options) {
       app._frameEma = saved.ema;
       app._slowFrames = saved.slow;
       app._fastFrames = saved.fast;
+      app._qualityLocked = saved.locked;
       sandbox.CyberMeow.renderQuality = saved.quality;
       app.resize();
     }

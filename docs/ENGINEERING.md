@@ -74,10 +74,11 @@ CyberMeow 是一个零外部依赖的桌面猫咪物理沙盒，使用原生 HTM
 - **渐变缓存泄漏**：远眼宝石渐变 key 含 `rx.toFixed(2)`，而 `rx` 随头部转动逐帧变化，长时间会话会让 `_gradCache` 单调增长。改为固定基准半径建渐变、绘制时用 scale 适配，key 仅依赖虹膜色；另设 64 条容量上限作防御。
 - **帧率一致性**：`toys.js` 与 `furniture.js` 的物理积分改用 `sceneContext.dt` 推导的帧步长，阻尼按 `Math.pow(阻尼, step)` 缩放；60fps 时行为与原先一致，其他刷新率下物理演化速度不再随帧率漂移。未传 `sceneContext` 的旧调用退化为 step=1。
 - **逃逸可审计**：`app.js` 中直写 `soundEngine.bgmEnabled` 与 `physicsWorld.gravityMode` 两处补 `@escape H4` 标记，落实 H3/H4/D3 裁决；不封死字段、不改变运行时行为。
+- **画质手动锁定**：按 `Q` 后设 `_qualityLocked`，`_updateRenderQuality` 早退，自适应不再在帧率回升时把 low 偷偷切回 high。默认仍自动；只有按过 `Q` 才锁定，使"切 low 做性能对照"成为可靠测量手段。
 
 ## 6. 测试体系
 
-测试入口为 `node tests/verify.js`，共 **93 项断言**，失败以退出码 1 结束。文件构成：
+测试入口为 `node tests/verify.js`，共 **94 项断言**，失败以退出码 1 结束。文件构成：
 
 - `tests/verify.js`：语法编译、核心逻辑、外部新特性行为链断言。
 - `tests/dom-mock.js`：最小浏览器 API 桩。canvas 2D 上下文用 Proxy 兜底，`requestAnimationFrame` 只登记回调、不自动执行，因此 `app.init()` 的主循环不会在测试中跑飞，可由测试手动推进单帧；另提供 `pathOps`/`drawImages` 计数器供基准使用。

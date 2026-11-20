@@ -96,6 +96,9 @@
       this._frameEma = 16.7;
       this._slowFrames = 0;
       this._fastFrames = 0;
+      // 按过 Q 后锁定手动档位：帧率回升时自适应不再把 low 悄悄切回 high，
+      // 保证性能对照测试（切 low 看是否流畅）得到稳定的档位。
+      this._qualityLocked = false;
       window.CyberMeow.renderQuality = 'high';
     }
 
@@ -542,7 +545,8 @@
         } else if (key === 'c') {
           this.toggleCatCam();
         } else if (key === 'q') {
-          // 手动画质覆盖：高 → 均衡 → 流畅 → 高；自动调节仍会在之后接管
+          // 手动画质：高 → 均衡 → 流畅 → 高；按过即锁定，自适应不再接管
+          this._qualityLocked = true;
           const order = ['high', 'medium', 'low'];
           const next = order[(order.indexOf(this.renderQuality) + 1) % order.length];
           this._frameEma = next === 'high' ? 14 : (next === 'medium' ? 20 : 35);
@@ -553,7 +557,7 @@
           const cap = next === 'high' ? 2 : (next === 'medium' ? 1.25 : 1);
           if (cap !== this._dprCap) { this._dprCap = cap; this.resize(); }
           const label = next === 'high' ? '高' : (next === 'medium' ? '均衡' : '流畅');
-          uiManager.showToast(`⚙️ 画质已切换为「${label}」（Q 键可继续切换）`);
+          uiManager.showToast(`⚙️ 画质已锁定为「${label}」（Q 键可继续切换，自适应已停用）`);
         }
       });
     }
@@ -966,6 +970,7 @@
     // 自适应画质：连续慢帧才降级，持续流畅才升级，避免在阈值附近来回抖动。
     // 降级只降低 DPR 与跳过部分昂贵绘制细节，不改玩法与实体数量。
     _updateRenderQuality() {
+      if (this._qualityLocked) return;
       const ema = this._frameEma;
       let next = this.renderQuality;
       if (ema > 22) { this._slowFrames++; this._fastFrames = 0; }
