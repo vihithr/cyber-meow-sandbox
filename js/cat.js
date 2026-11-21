@@ -2687,7 +2687,8 @@
           const landingSurfaceHosts = this._landingSurfaceHosts ||
             (this._landingSurfaceHosts = new WeakMap());
           landingSurfaces.length = 0;
-          if (sceneContext?.furniture) {
+          // 主动扑下时从家具前方越过；地面仍参与下面的扫掠。
+          if (this.state !== 'aerial_pounce_drop' && sceneContext?.furniture) {
             for (let f of sceneContext.furniture) {
               const surfaces = f.getPerchSurfaces ? f.getPerchSurfaces() : (
                 f.type === 'perch' ? [{ id: f, x: f.x, y: f.y, w: f.w, type: 'perch' }] :
@@ -2900,6 +2901,13 @@
         }
         this.state = 'in_box';
         return;
+      }
+
+      if (this.state === 'aerial_pounce_drop') {
+        if (this.aerialTarget && physicsWorld.getGravity() > 0) return;
+        this.state = 'idle';
+        this.aerialTarget = null;
+        this.aerialTargetType = null;
       }
 
       // 优先级2.4：空降跳杀蓄力中 (Aerial Pounce Aim)

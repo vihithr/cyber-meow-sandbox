@@ -550,6 +550,25 @@ test('空降跳杀蓄力结束转入下坠并解除所有落脚状态', () => {
   assert.ok(cat.vy < -2.5, `下坠初速度异常: ${cat.vy}`);
 });
 
+test('天降神猫从高台起扑，越过中层平台并实际命中下方目标', () => {
+  const cat = new Cat({ x: 500, y: 200, breed: BREEDS[0] });
+  const top = { type: 'perch', x: 500, y: cat.y + cat.radius, w: 240 };
+  const middle = { type: 'perch', x: 500, y: top.y + 95, w: 240 };
+  const roomba = { type: 'roomba', x: 500, y: top.y + 200, vx: 0, spin: 0 };
+  const scene = { cats: [cat], furniture: [top, middle, roomba], toys: [], spawnParticle: noop };
+  cat.perchedTier = top;
+  assert.ok(cat.checkAerialPounce(scene));
+  let crossed = false;
+  for (let frame = 0; frame < 180 && !roomba.spin; frame++) {
+    cat.update(1920, 1080, scene);
+    if (cat.y + cat.radius > middle.y + 1) crossed = true;
+    assert.notStrictEqual(cat.perchedTier, middle);
+  }
+  assert.ok(crossed);
+  assert.strictEqual(roomba.spin, .35);
+  assert.strictEqual(cat.aerialTarget, null);
+});
+
 test('空降跳杀落地对扫地机结算：击退与旋转', () => {
   const cat = new Cat(530, 400, { breed: BREEDS[0] });
   cat.state = 'aerial_pounce_drop';
@@ -670,13 +689,13 @@ test('Q萌猫团子灵动立体双眼与白猫异瞳配置', () => {
   assert.ok(whiteBreed.eyeColor && whiteBreed.eyeRightColor, '白猫缺少异瞳配色支持');
   assert.notStrictEqual(whiteBreed.eyeColor, whiteBreed.eyeRightColor, '白猫左右眼颜色应不同');
 
-  const cat = new Cat(300, 300, { breed: whiteBreed });
+  const cat = new Cat({ x: 300, y: 300, breed: whiteBreed });
   const mockCtx = {
     save: noop, restore: noop, translate: noop, scale: noop, rotate: noop,
     beginPath: noop, ellipse: noop, arc: noop, fill: noop, stroke: noop,
     moveTo: noop, lineTo: noop, closePath: noop, quadraticCurveTo: noop, bezierCurveTo: noop,
     clip: noop, createLinearGradient: () => ({ addColorStop: noop }),
-    fillText: noop, measureText: () => ({ width: 40 }), getTransform: () => ({ a: 1 }),
+    fillRect: noop, fillText: noop, measureText: () => ({ width: 40 }), getTransform: () => ({ a: 1 }),
     setTransform: noop
   };
 
