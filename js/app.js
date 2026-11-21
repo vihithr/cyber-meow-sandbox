@@ -39,6 +39,20 @@
   const MAX_FURNITURE = 60;
   const MAX_CATS = 40;
   const MAX_PARTICLES = 240;
+  const ROOMS = [
+    { id: 'patio', title: '阳光露台', center: 500 },
+    { id: 'living', title: '起居室', center: 1500 },
+    { id: 'playground', title: '攀爬乐园', center: 2500 }
+  ];
+
+  const PLACEMENT_FOOTPRINTS = {
+    box: { w: 58, h: 38, grounded: true },
+    cattree: { w: 130, h: 18, grounded: true },
+    roomba: { w: 68, h: 36, grounded: true },
+    scratcher: { w: 75, h: 24, grounded: true },
+    bridge: { w: 280, h: 18 },
+    hammock: { w: 115, h: 34 }
+  };
 
   // 视口裁剪安全余量（世界像素）：覆盖最大道具半宽、悬吊摆动、拖拽与拖尾动画，
   // 宁可多画一点也不误裁边缘对象；缩小视口范围才省填充率。
@@ -47,6 +61,7 @@
   class CyberMeowApp {
     constructor() {
       this.canvas = document.getElementById('playground');
+      this.canvasContainer = document.getElementById('canvas-container');
       this.ctx = this.canvas.getContext('2d');
       this.viewportWidth = window.innerWidth;
       this.viewportHeight = window.innerHeight;
@@ -59,6 +74,8 @@
       this.targetCameraX = 0;
       this.zoom = 1.0;
       this.targetZoom = 1.0;
+      this.fitZoom = 1.0;
+      this.wideAngle = false;
       this.isPanningCamera = false;
       this.panStartX = 0;
       this.panStartCamX = 0;
@@ -83,7 +100,8 @@
       // 控制状态
       this.currentTool = 'pet';
       this.laser = { x: -100, y: -100, active: false };
-      this.mouse = { x: this.width / 2, y: this.height / 2, isDown: false, draggedCat: null, dragCandidate: null, dragStartPos: { x: 0, y: 0 } };
+      this.mouse = { x: 0, y: 0, overScene: false, isDown: false, draggedCat: null };
+      this.dragOffset = { x: 0, y: 0 };
 
       // 猫咪渲染模式：'chibi' (Q萌团子，默认常态极速) | 'procedural' (次世代高精拟真)
       this.catRenderStyle = 'chibi';
@@ -105,8 +123,7 @@
         active: false,
         itemType: null,
         ghostX: 0,
-        ghostY: 0,
-        valid: true
+        ghostY: 0
       };
 
       // 拖拽抚摸与双击检测
@@ -139,6 +156,7 @@
         this.initDefaultScene();
       }
 
+      this.roomFurniture = new Set(this.furniture);
       uiManager.init();
       this.bindInputs();
       this.bindUIButtons();
@@ -150,22 +168,33 @@
       this.loop = this.loop.bind(this);
       requestAnimationFrame(this.loop);
 
-      uiManager.showToast('🏰 欢迎来到 3000px 超宽猫猫豪宅！右键拖动平移全景，按 C 开启喵视角~');
+      uiManager.showToast('点击抚摸，按住拖动，双击抱入怀中。', 4800);
     }
 
     resize() {
       // 按设备像素比设置画布后备缓冲；上限由自适应画质动态控制（2 / 1.25 / 1）
       const dpr = Math.min(window.devicePixelRatio || 1, this._dprCap);
       this.dpr = dpr;
-      this.viewportWidth = window.innerWidth;
-      this.viewportHeight = window.innerHeight;
+      const width = this.canvasContainer?.clientWidth;
+      const height = this.canvasContainer?.clientHeight;
+      this.viewportWidth = width || window.innerWidth;
+      this.viewportHeight = height || window.innerHeight;
+      if (!this._sceneHeight) {
+        this._sceneHeight = Math.max(480, this.viewportHeight);
+        this.worldWidth = Math.max(3000, this.viewportWidth * 1.8);
+      }
+      this.height = this._sceneHeight;
+      this.width = this.worldWidth;
+      this.fitZoom = this.viewportHeight / this.height;
+      this.targetZoom = this.fitZoom * (this.wideAngle ? 0.76 : 1);
+      this.zoom = this.targetZoom;
+      const maxCamX = Math.max(0, this.worldWidth - this.viewportWidth / this.zoom);
+      this.targetCameraX = MathUtils.clamp(this.targetCameraX, 0, maxCamX);
+      this.cameraX = MathUtils.clamp(this.cameraX, 0, maxCamX);
       this.canvas.width = Math.round(this.viewportWidth * dpr);
       this.canvas.height = Math.round(this.viewportHeight * dpr);
       this.canvas.style.width = this.viewportWidth + 'px';
       this.canvas.style.height = this.viewportHeight + 'px';
-      this.worldWidth = Math.max(3000, window.innerWidth * 1.8);
-      this.width = this.worldWidth;
-      this.height = this.viewportHeight;
     }
 
     // 初始化超宽大平层三区豪宅：阳光露台 (0-1000) | 豪华客厅 (1000-2000) | 游乐高塔 (2000-3000)
@@ -174,12 +203,12 @@
       const floorY = physicsWorld.getFloorY(this.height);
 
       // --- 1. 左翼：阳光全景温室露台 (Sunlit Solarium, 0-1000) ---
-      this.furniture.push(new WindowSill(240, this.height * 0.28, 200, 150));
+      this.furniture.push(new WindowSill(172, floorY * 0.36, 224, 150));
       this.furniture.push(new WallClimbLadder(360, floorY - 50, 3, 1, 65, 12, 70, -60));
       this.furniture.push(new CatTree(640, floorY)); // 露台温室景观猫爬架！
       this.furniture.push(new WallPerch(820, floorY - 240, 130, 16));
       this.furniture.push(new CeilingDanglingToy(740, floorY - 280, '#ff7675'));
-      this.furniture.push(new CardboardBox(450, floorY - 25));
+      this.furniture.push(new CardboardBox(531, floorY - 25));
 
       // --- 2. 中央：豪华猫咪大客厅 (Grand Living Room, 1000-2000) ---
       this.furniture.push(new SmartFeeder(1180, floorY)); // 智能自动出粮投喂机
@@ -204,10 +233,11 @@
       this.furniture.push(new CeilingDanglingToy(2630, floorY - 300, '#fd79a8'));
       this.toys.push(new CardboardBox(2760, floorY - 25));
 
-      // 默认生成 3 只可爱猫咪，分布在不同区域
-      this.cats.push(new Cat(450, floorY - 35, { breed: BREEDS[0], name: '大橘' }));
-      this.cats.push(new Cat(1350, floorY - 35, { breed: BREEDS[1], name: '奥利奥' }));
-      this.cats.push(new Cat(2350, floorY - 35, { breed: BREEDS[3], name: '雪球' }));
+      // 露台靠近镜头的两只猫，其余猫咪分布在另外两个房间。
+      this.cats.push(new Cat(155, floorY - 30, { breed: BREEDS[2], name: '年糕', hat: 'none' }));
+      this.cats.push(new Cat(450, floorY - 35, { breed: BREEDS[0], name: '大橘', hat: 'none' }));
+      this.cats.push(new Cat(1350, floorY - 35, { breed: BREEDS[1], name: '奥利奥', hat: 'bell' }));
+      this.cats.push(new Cat(2350, floorY - 35, { breed: BREEDS[3], name: '雪球', hat: 'none' }));
 
       // 初始镜头停留在露台与客厅交界
       this.cameraX = 0;
@@ -226,86 +256,79 @@
     }
 
     setTool(tool) {
+      if (this.placement.active) this.cancelPlacement();
       this.currentTool = tool;
       document.querySelectorAll('#dock-container .dock-item').forEach(btn => {
         if (btn.dataset.tool) {
-          btn.classList.toggle('active', btn.dataset.tool === tool);
+          const active = btn.dataset.tool === tool;
+          btn.classList.toggle('active', active);
+          btn.setAttribute?.('aria-pressed', String(active));
         }
       });
 
+      this.closeToolDrawer();
+      this.canvas.style.cursor = (tool === 'laser' || tool === 'feather') ? 'crosshair' : 'default';
       this.laser.active = (tool === 'laser');
       featherWand.active = (tool === 'feather');
 
       const hints = {
-        'pet': '👆 抚摸抓起：在猫身上滑动抚摸，按住拖动可自由抓起或抛掷；双击可抱入特写侍奉！',
-        'cat': '🐱 召唤猫咪：点击画布召唤一只全新的随机品种猫咪！',
-        'laser': '🔴 激光红点：在屏幕上移动，猫咪们会集体兴奋飞扑！',
-        'feather': '🪶 逗猫棒：挥动羽毛吸引小猫咪捕猎跳跃！',
-        'fish': '🐟 投喂鱼干：美味小零食，猫咪会闻香飞奔吃掉！',
-        'yarn': '🧶 扔毛线球：带有真实弹力的毛线球，扑咬会散开！',
-        'box': '📦 放置纸箱：经典纸箱，胖猫还会卡屁股！',
-        'cattree': '🌳 放置猫爬架：猫咪可以跳上多层平台登高望远！',
-        'roomba': '🤖 智能扫地机：地面巡逻并推撞开障碍物，猫咪可骑乘！',
-        'scratcher': '🪵 放置猫抓板：让猫咪磨爪子，保护家具！',
-        'catnip': '🌿 猫薄荷喷雾：让猫咪陷入极乐打滚与兔子蹬！',
-        'recycle': '🧹 回收工具：点击任意散落玩具或家具将其一键温和回收！'
+        pet: '点击抚摸，按住拖动，双击抱入怀中。',
+        cat: '点击房间，领养一只随机猫咪。',
+        laser: '移动光标，引导猫咪追逐红点。',
+        feather: '挥动逗猫棒，吸引猫咪扑跳。',
+        fish: '点击房间，投喂小鱼干。',
+        yarn: '点击房间，投出毛线球。',
+        box: '点击房间，在地面放置纸箱。',
+        cattree: '点击房间，在地面放置猫爬架。',
+        bridge: '点击房间，放置空中天桥。',
+        hammock: '点击房间，放置吊床。',
+        roomba: '点击房间，放置扫地机。',
+        scratcher: '点击房间，在地面放置抓板。',
+        catnip: '点击房间，在附近撒猫薄荷。',
+        recycle: '点击道具，将它收回。'
       };
       uiManager.showToast(hints[tool] || '');
     }
 
     toggleCatLOD() {
-      this.catRenderStyle = this.catRenderStyle === 'chibi' ? 'procedural' : 'chibi';
-      if (this.renderEngineConfig) {
-        this.renderEngineConfig.pipeline = this.catRenderStyle;
-      }
-      const lodBtn = document.getElementById('btn-cat-lod');
-      const isChibi = this.catRenderStyle === 'chibi';
-      if (lodBtn) {
-        lodBtn.innerText = isChibi ? '🐱 风格: Q萌团子' : '🐱 风格: 高精拟真';
-        lodBtn.style.color = isChibi ? '#feca57' : '#1dd1a1';
-      }
-      uiManager.showToast(isChibi ? '🐱 已切换至「Q萌团子」极速渲染模式（60FPS 极佳流畅度）~' : '🐱 已切换至「次世代高精拟真」解剖骨骼渲染模式~');
-      if (uiManager && uiManager.syncTunerUI) uiManager.syncTunerUI();
+      this.setRenderPipeline(this.catRenderStyle === 'chibi' ? 'procedural' : 'chibi');
+      uiManager.syncTunerUI();
     }
 
     applyRenderPreset(preset) {
-      if (window.CyberMeow && window.CyberMeow.renderEngineManager) {
-        window.CyberMeow.renderEngineManager.applyPreset(preset);
-        this.renderEngineConfig = window.CyberMeow.renderEngineManager.config;
+      const manager = window.CyberMeow.renderEngineManager;
+      if (manager) {
+        manager.applyPreset(preset);
+        this.renderEngineConfig = manager.config;
       }
-      const pipe = this.renderEngineConfig.pipeline;
-      this.catRenderStyle = (pipe === 'procedural') ? 'procedural' : 'chibi';
-      const lodBtn = document.getElementById('btn-cat-lod');
-      if (lodBtn) {
-        lodBtn.innerText = this.catRenderStyle === 'chibi' ? '🐱 风格: Q萌团子' : '🐱 风格: 高精拟真';
-        lodBtn.style.color = this.catRenderStyle === 'chibi' ? '#feca57' : '#1dd1a1';
-      }
-      uiManager.showToast(`⚙️ 已应用预设：${preset === 'saver' ? '🔋 极致节能' : preset === 'ultra' ? '🧬 次世代高精' : '🐾 萌系平衡'}`);
+      this.syncModelButton();
+      const labels = { saver: '流畅', balanced: '均衡', ultra: '高精度' };
+      uiManager.showToast(`画质 · ${labels[preset] || labels.balanced}`);
+    }
+
+    syncModelButton() {
+      this.catRenderStyle = this.renderEngineConfig.pipeline === 'procedural' ? 'procedural' : 'chibi';
+      const button = document.getElementById('btn-cat-lod');
+      if (button) button.innerText = this.catRenderStyle === 'chibi' ? '画风 · 团子' : '画风 · 骨骼';
     }
 
     setRenderPipeline(pipe) {
-      if (!this.renderEngineConfig) return;
       this.renderEngineConfig.pipeline = pipe;
-      this.catRenderStyle = (pipe === 'procedural') ? 'procedural' : 'chibi';
-      const lodBtn = document.getElementById('btn-cat-lod');
-      if (lodBtn) {
-        lodBtn.innerText = this.catRenderStyle === 'chibi' ? '🐱 风格: Q萌团子' : '🐱 风格: 高精拟真';
-        lodBtn.style.color = this.catRenderStyle === 'chibi' ? '#feca57' : '#1dd1a1';
-      }
-      uiManager.showToast(`🎨 渲染管线已切换为: ${pipe === 'chibi_cached' ? '极速离屏烘焙' : pipe === 'procedural' ? '次世代骨骼拟真' : 'Q萌团子实时矢量'}`);
+      this.syncModelButton();
+      uiManager.showToast(document.getElementById('btn-cat-lod')?.innerText || '');
     }
 
     setClusterMode(mode) {
-      if (!this.renderEngineConfig) return;
       this.renderEngineConfig.clusterMode = mode;
-      uiManager.showToast(`🏷️ 标签折叠策略已切换为: ${mode === 'smart' ? '智能聚类防重叠' : mode === 'minimal' ? '极简微标模式' : '经典全量展开'}`);
     }
 
     startPlacement(itemType) {
+      this.setTool('pet');
       this.placement.active = true;
+      this.canvas.style.cursor = 'crosshair';
       this.placement.itemType = itemType;
-      this.placement.ghostX = this.mouse.x;
-      this.placement.ghostY = this.mouse.y;
+      this.placement.ghostX = null;
+      this.placement.ghostY = null;
 
       const itemNames = {
         cat: '🐱 随机萌猫',
@@ -323,8 +346,8 @@
       const hud = document.getElementById('placement-hud');
       const hint = document.getElementById('placement-hint');
       if (hud) hud.style.display = 'flex';
-      if (hint) hint.innerText = `🔨 正在放置: 【${itemNames[itemType] || itemType}】`;
-      uiManager.showToast(`🔨 放置模式开启！移动鼠标预览位置，左键点击放置，右键或 ESC 取消~`);
+      if (hint) hint.innerText = `放置 · ${itemNames[itemType] || itemType}`;
+      uiManager.showToast('点击房间放置。');
     }
 
     cancelPlacement() {
@@ -333,17 +356,28 @@
       this.placement.itemType = null;
       const hud = document.getElementById('placement-hud');
       if (hud) hud.style.display = 'none';
-      uiManager.showToast('已退出放置模式~');
+      this.canvas.style.cursor = 'default';
+      uiManager.showToast('');
     }
 
-    executePlacement(worldX, worldY) {
-      const type = this.placement.itemType;
+    placementLocation(type, x, y) {
+      const footprint = PLACEMENT_FOOTPRINTS[type];
       const floorY = physicsWorld.getFloorY(this.height);
+      const margin = footprint ? footprint.w / 2 + 10 : 24;
+      const atX = MathUtils.clamp(x, margin, this.worldWidth - margin);
+      const atY = footprint?.grounded ? floorY :
+        MathUtils.clamp(y, footprint ? 60 : 28, floorY - (footprint ? 45 : 18));
+      return { x: atX, y: atY, footprint, floorY };
+    }
+
+    executePlacement(x, y) {
+      const type = this.placement.itemType;
+      const { x: worldX, y: worldY, floorY } = this.placementLocation(type, x, y);
 
       if (type === 'cat') {
         if (this.cats.length >= MAX_CATS) {
-          uiManager.showToast(`🐾 猫咪已达上限 ${MAX_CATS} 只！`);
           this.cancelPlacement();
+          uiManager.showToast(`猫咪已达上限 ${MAX_CATS} 只。`);
           return;
         }
         const newCat = new Cat(worldX, worldY);
@@ -361,13 +395,13 @@
         this.furniture.push(new CardboardBox(worldX, floorY - 25));
         soundEngine.playPop();
       } else if (type === 'cattree') {
-        this.furniture.push(new CatTree(worldX, this.height));
+        this.furniture.push(new CatTree(worldX, floorY));
         soundEngine.playPop();
       } else if (type === 'roomba') {
-        this.furniture.push(new Roomba(worldX, this.height - 20));
+        this.furniture.push(new Roomba(worldX, floorY - 20));
         soundEngine.playPop();
       } else if (type === 'scratcher') {
-        this.furniture.push(new Scratcher(worldX, this.height));
+        this.furniture.push(new Scratcher(worldX, floorY));
         soundEngine.playPop();
       } else if (type === 'bridge') {
         this.furniture.push(new CatSuspensionBridge(worldX, worldY, 280));
@@ -395,29 +429,24 @@
     }
 
     drawGhostPreview(ctx) {
-      if (!this.placement.active) return;
-      const { ghostX, ghostY, itemType } = this.placement;
-      const floorY = physicsWorld.getFloorY(this.height);
-      const isGroundItem = (itemType === 'cattree' || itemType === 'scratcher' || itemType === 'roomba' || itemType === 'box');
-      const snapY = isGroundItem ? (floorY - 20) : ghostY;
+      const { active, ghostX, ghostY, itemType } = this.placement;
+      if (!active || ghostX === null || !this.mouse.overScene) return;
+      const { x, y, footprint } = this.placementLocation(itemType, ghostX, ghostY);
 
       ctx.save();
-      ctx.globalAlpha = 0.75;
-
       ctx.beginPath();
-      ctx.arc(ghostX, snapY, 32, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(29, 209, 161, 0.25)';
+      if (footprint) {
+        const top = footprint.grounded ? y - footprint.h : y;
+        ctx.roundRect(x - footprint.w / 2, top, footprint.w, footprint.h, 5);
+      } else {
+        ctx.arc(x, y, itemType === 'catnip' ? 34 : 20, 0, Math.PI * 2);
+      }
+      ctx.fillStyle = 'rgba(235, 247, 224, .50)';
       ctx.fill();
-      ctx.strokeStyle = '#1dd1a1';
-      ctx.lineWidth = 2.5;
-      ctx.setLineDash([5, 5]);
+      ctx.strokeStyle = '#355d47';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
       ctx.stroke();
-
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 12px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('✔️ 点击放置', ghostX, snapY - 42);
-
       ctx.restore();
     }
 
@@ -432,8 +461,22 @@
       const screenY = clientY - rect.top;
 
       const worldX = screenX / this.zoom + this.cameraX;
-      const worldY = screenY / this.zoom;
+      const worldY = (screenY - this.sceneOffsetY) / this.zoom;
       return { x: worldX, y: worldY, screenX, screenY };
+    }
+
+    get sceneOffsetY() {
+      return this.wideAngle || this._zoomTransition
+        ? Math.max(0, (this.viewportHeight - this.height * this.zoom) * 0.5)
+        : 0;
+    }
+
+    catAt(x, y) {
+      for (let i = this.cats.length - 1; i >= 0; i--) {
+        const cat = this.cats[i];
+        if (cat.containsVisualPoint(x, y, this.catRenderStyle)) return cat;
+      }
+      return null;
     }
 
     bindInputs() {
@@ -441,7 +484,13 @@
       this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
       const onPointerDown = (e) => {
+        if (e.isPrimary === false && e.pointerType) return;
         soundEngine.init();
+
+        if (this.placement.active && e.button === 2) {
+          this.cancelPlacement();
+          return;
+        }
 
         // 1. 右键或中键：进入视口相机拖拽平移
         if (e.button === 2 || e.button === 1) {
@@ -462,6 +511,8 @@
         this.mouse.x = pos.x;
         this.mouse.y = pos.y;
         this.mouse.isDown = true;
+        this.mouse.overScene = true;
+        this.petDistanceTracker = 0;
         this.lastMousePos = { x: pos.x, y: pos.y };
 
         // 0. 放置模式拦截：左键确认放置，右键取消
@@ -490,7 +541,9 @@
             const f = this.furniture[i];
             const fw = f.w || f.width || 50;
             if (f && Math.abs(f.x - pos.x) < fw / 2 + 15 && Math.abs(f.y - pos.y) < 70) {
-              for (let c of this.cats) MountSystem.dismount(c);
+              for (const c of this.cats) {
+                if (c.inBox === f || c.ridingObj === f || c._mountHost === f) MountSystem.dismount(c);
+              }
               this.furniture.splice(i, 1);
               soundEngine.playPop();
               this.spawnParticle(pos.x, pos.y, '💨 已回收');
@@ -498,6 +551,28 @@
               return;
             }
           }
+        }
+
+        // Cats are painted above furniture, including cats standing on a platform.
+        const clickedCat = this.catAt(pos.x, pos.y);
+        if (clickedCat) {
+          const now = Date.now();
+          if (this.lastClickedCat === clickedCat && now - this.lastClickTime < 320) {
+            uiManager.openCloseUpStudio(clickedCat);
+            this.lastClickedCat = null;
+            return;
+          }
+          this.lastClickedCat = clickedCat;
+          this.lastClickTime = now;
+          this.mouse.draggedCat = clickedCat;
+          this.dragOffset.x = clickedCat.x - pos.x;
+          this.dragOffset.y = clickedCat.y - pos.y;
+          clickedCat.vx = 0;
+          clickedCat.vy = 0;
+          clickedCat.isGrabbed = true;
+          MountSystem.dismount(clickedCat);
+          clickedCat.pet(this);
+          return;
         }
 
         // 2. 检测是否按中了家具进行特色交互 (投喂机/猫爬架玩球登高/吊床摇摆/风铃羽毛球/空中天桥)
@@ -562,36 +637,8 @@
           }
         }
 
-        // 3. 检查是否点击了猫咪 (在任何工具模式下，只要按中猫咪，都优先允许抓起或双击侍奉！)
-        let clickedCat = null;
-        for (let i = this.cats.length - 1; i >= 0; i--) {
-          const c = this.cats[i];
-          if (Math.hypot(c.x - pos.x, c.y - pos.y) < c.radius + 15) {
-            clickedCat = c;
-            break;
-          }
-        }
-
-        if (clickedCat) {
-          // 双击检测：若 320ms 内连续点击同一只猫，打开桌面特写侍奉台！
-          const now = Date.now();
-          if (this.lastClickedCat === clickedCat && (now - this.lastClickTime < 320)) {
-            uiManager.openCloseUpStudio(clickedCat);
-            this.lastClickedCat = null;
-            return;
-          }
-          this.lastClickedCat = clickedCat;
-          this.lastClickTime = now;
-
-          // 抓起猫咪：统一通过 MountSystem 清除依附引用，保证随时能放回！
-          this.mouse.draggedCat = clickedCat;
-          clickedCat.isGrabbed = true;
-          MountSystem.dismount(clickedCat);
-          clickedCat.pet(this);
-          return;
-        }
-
         // 4. 工具使用逻辑 (在空白处点击)
+        const floorY = physicsWorld.getFloorY(this.height);
         if (this.currentTool === 'cat') {
           if (this.cats.length >= MAX_CATS) {
             uiManager.showToast(`🐾 猫咪已达上限 ${MAX_CATS} 只，先撸撸现有的小可爱吧！`);
@@ -612,13 +659,13 @@
           this.furniture.push(new CardboardBox(pos.x, pos.y));
           soundEngine.playPop();
         } else if (this.currentTool === 'cattree') {
-          this.furniture.push(new CatTree(pos.x, this.height));
+          this.furniture.push(new CatTree(pos.x, floorY));
           soundEngine.playPop();
         } else if (this.currentTool === 'roomba') {
-          this.furniture.push(new Roomba(pos.x, this.height - 20));
+          this.furniture.push(new Roomba(pos.x, floorY - 20));
           soundEngine.playPop();
         } else if (this.currentTool === 'scratcher') {
-          this.furniture.push(new Scratcher(pos.x, this.height));
+          this.furniture.push(new Scratcher(pos.x, floorY));
           soundEngine.playPop();
         } else if (this.currentTool === 'bridge') {
           this.furniture.push(new CatSuspensionBridge(pos.x, pos.y, 280));
@@ -643,6 +690,8 @@
       };
 
       const onPointerMove = (e) => {
+        if (e.isPrimary === false && e.pointerType) return;
+        this.mouse.overScene = e.target === this.canvas;
         // 相机平移处理
         if (this.isPanningCamera) {
           const dx = e.clientX - this.panStartX;
@@ -651,6 +700,7 @@
           return;
         }
 
+        if (!this.mouse.overScene && !this.mouse.isDown) return;
         const pos = this.getWorldPos(e);
         this.mouse.x = pos.x;
         this.mouse.y = pos.y;
@@ -666,36 +716,22 @@
 
         // 拖拽抓起的猫咪
         if (this.mouse.draggedCat) {
-          this.mouse.draggedCat.x = pos.x;
-          this.mouse.draggedCat.y = pos.y;
+          this.mouse.draggedCat.x = pos.x + this.dragOffset.x;
+          this.mouse.draggedCat.y = pos.y + this.dragOffset.y;
           this.mouse.draggedCat.vx = (pos.x - this.lastMousePos.x) * 0.85;
           this.mouse.draggedCat.vy = (pos.y - this.lastMousePos.y) * 0.85;
         }
 
-        // 光标悬浮提示
-        let isHoveringCat = false;
-        for (let c of this.cats) {
-          if (Math.hypot(c.x - pos.x, c.y - pos.y) < c.radius + 16) {
-            isHoveringCat = true;
-            break;
-          }
-        }
-        if (!this.laser.active && !featherWand.active) {
-          this.canvas.style.cursor = this.mouse.draggedCat ? 'grabbing' : (isHoveringCat ? 'grab' : 'default');
+        const petTarget = this.catAt(pos.x, pos.y);
+        if (!this.placement.active && !this.laser.active && !featherWand.active) {
+          this.canvas.style.cursor = this.mouse.draggedCat ? 'grabbing' : (petTarget ? 'grab' : 'default');
         }
 
-        // 抚摸手势累计
-        if (this.currentTool === 'pet' && this.mouse.isDown && !this.mouse.draggedCat) {
-          const delta = Math.hypot(pos.x - this.lastMousePos.x, pos.y - this.lastMousePos.y);
-          this.petDistanceTracker += delta;
+        if (this.currentTool === 'pet' && this.mouse.isDown && !this.mouse.draggedCat && petTarget) {
+          this.petDistanceTracker += Math.hypot(pos.x - this.lastMousePos.x, pos.y - this.lastMousePos.y);
           if (this.petDistanceTracker > 32) {
             this.petDistanceTracker = 0;
-            for (let c of this.cats) {
-              if (Math.hypot(c.x - pos.x, c.y - pos.y) < c.radius + 20) {
-                c.pet(this);
-                break;
-              }
-            }
+            petTarget.pet(this);
           }
         }
 
@@ -703,6 +739,7 @@
       };
 
       const onPointerUp = (e) => {
+        if (e?.isPrimary === false && e.pointerType) return;
         if (e && e.pointerId && this.canvas.releasePointerCapture) {
           try { this.canvas.releasePointerCapture(e.pointerId); } catch(err){}
         }
@@ -713,8 +750,9 @@
           const c = this.mouse.draggedCat;
           c.isGrabbed = false;
           c.state = 'idle';
-          c.vx = MathUtils.clamp(c.vx, -9, 9);
-          c.vy = MathUtils.clamp(c.vy, -9, 9);
+          const limit = e?.type === 'pointercancel' ? 0 : 9;
+          c.vx = MathUtils.clamp(c.vx, -limit, limit);
+          c.vy = MathUtils.clamp(c.vy, -limit, limit);
           this.mouse.draggedCat = null;
         }
 
@@ -725,6 +763,7 @@
       // 滚轮横向平移全景世界
       this.canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
+        this.catCam = null;
         const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
         const maxCamX = Math.max(0, this.worldWidth - this.viewportWidth / this.zoom);
         this.targetCameraX = MathUtils.clamp(this.targetCameraX + delta * 1.2, 0, maxCamX);
@@ -737,14 +776,28 @@
 
       // 键盘快捷键与 A/D 平移相机
       window.addEventListener('keydown', (e) => {
-        if (e.target.tagName === 'INPUT') return;
-
+        if (e.code === 'Escape') {
+          if (uiManager.activeModal) uiManager.dismissModal();
+          else if (!this.closeSettings() && !this.closeToolDrawer()) this.cancelPlacement();
+          return;
+        }
+        if (e.altKey || e.ctrlKey || e.metaKey ||
+            /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable) return;
         const key = e.key.toLowerCase();
+        if (uiManager.activeModal) {
+          const activeID = uiManager.activeModal.id;
+          if ((key === 'b' && activeID === 'build-catalog-modal') ||
+              (key === 'e' && activeID === 'render-tuner-modal')) uiManager.dismissModal();
+          return;
+        }
+        if (e.code === 'Space' && /^(BUTTON|SUMMARY|A)$/.test(e.target.tagName)) return;
         const maxCamX = Math.max(0, this.worldWidth - this.viewportWidth / this.zoom);
 
         if (key === 'a' || e.code === 'ArrowLeft') {
+          this.catCam = null;
           this.targetCameraX = Math.max(0, this.targetCameraX - 120);
         } else if (key === 'd' || e.code === 'ArrowRight') {
+          this.catCam = null;
           this.targetCameraX = Math.min(maxCamX, this.targetCameraX + 120);
         } else if (key === 'b') {
           const catalog = document.getElementById('build-catalog-modal');
@@ -762,11 +815,6 @@
           } else {
             uiManager.openRenderTuner();
           }
-        } else if (e.code === 'Escape') {
-          if (this.placement.active) this.cancelPlacement();
-          uiManager.closeBuildCatalog();
-          uiManager.closeCatPassport();
-          uiManager.closeRenderTuner();
         } else if (key === '1') this.setTool('pet');
         else if (key === '2') this.setTool('cat');
         else if (key === '3') this.setTool('laser');
@@ -833,59 +881,77 @@
       uiManager.showToast(`🐱 喵视角启动：镜头正在跟随「${cat.name}」！按 C 退出~`);
     }
 
-    // 绑定豪宅三区分区导航与全景缩放切换
     bindManorNavigation() {
-      const zoneBtns = document.querySelectorAll('.nav-zone-btn');
-      zoneBtns.forEach(btn => {
-        btn.onclick = () => {
-          zoneBtns.forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          // 分区导航是明确的手动镜头控制，退出喵视角
+      this.zoneButtons = document.querySelectorAll('.nav-zone-btn');
+      this.zoneButtons.forEach((button) => {
+        button.onclick = () => {
+          const room = ROOMS.find(({ id }) => id === button.dataset.zone);
+          if (!room) return;
           this.catCam = null;
-
-          const zone = btn.dataset.zone;
-          const maxCamX = Math.max(0, this.worldWidth - this.viewportWidth / this.zoom);
-          if (zone === 'patio') {
-            this.targetCameraX = 0;
-            uiManager.showToast('☀️ 已平移至「阳光露台」：全景大窗与温暖日光！');
-          } else if (zone === 'living') {
-            this.targetCameraX = Math.min(maxCamX, 980);
-            uiManager.showToast('🛋️ 已平移至「豪华客厅」：大波斯地毯与智能自动投喂机！');
-          } else if (zone === 'playground') {
-            this.targetCameraX = maxCamX;
-            uiManager.showToast('🎪 已平移至「游乐高塔」：多层天桥跳台与豪华猫爬架！');
-          }
+          const viewWidth = this.viewportWidth / this.targetZoom;
+          this.targetCameraX = MathUtils.clamp(room.center - viewWidth / 2, 0, Math.max(0, this.worldWidth - viewWidth));
         };
       });
 
-      // 全景 / 常规视角切换 (Zoom Toggle)
       const zoomBtn = document.getElementById('btn-zoom-toggle');
-      if (zoomBtn) {
-        zoomBtn.onclick = () => {
-          if (this.targetZoom >= 0.95) {
-            // 切到全景俯瞰视角 (0.62x)
-            this.targetZoom = 0.62;
-            zoomBtn.innerText = '🔍 返回常规';
-            zoomBtn.style.color = '#2ed573';
-            uiManager.showToast('🔭 已开启 0.62x 全景俯瞰模式，一览整座 3000px 豪宅！');
-          } else {
-            // 切回常规视角 (1.0x)
-            this.targetZoom = 1.0;
-            zoomBtn.innerText = '🔍 切换全景';
-            zoomBtn.style.color = '#feca57';
-            uiManager.showToast('🔍 已恢复 1.0x 细腻吸猫视角！');
-          }
-        };
-      }
+      if (zoomBtn) zoomBtn.onclick = () => {
+        const center = this.cameraX + this.viewportWidth / (2 * this.zoom);
+        this.wideAngle = !this.wideAngle;
+        this._zoomTransition = true;
+        this.targetZoom = this.fitZoom * (this.wideAngle ? 0.76 : 1);
+        const viewWidth = this.viewportWidth / this.targetZoom;
+        this.targetCameraX = MathUtils.clamp(center - viewWidth / 2, 0, Math.max(0, this.worldWidth - viewWidth));
+        zoomBtn.innerText = this.wideAngle ? '还原' : '广角';
+        zoomBtn.setAttribute?.('aria-pressed', String(this.wideAngle));
+      };
+      this.updateRoomNav();
+    }
+
+    updateRoomNav() {
+      const center = this.cameraX + this.viewportWidth / (2 * this.zoom);
+      const room = ROOMS[MathUtils.clamp(Math.floor(center / 1000), 0, ROOMS.length - 1)];
+      if (this.activeRoom === room) return;
+      this.activeRoom = room;
+      const name = document.getElementById('current-room');
+      if (name) name.innerText = room.title;
+      this.zoneButtons?.forEach((button) => {
+        const active = button.dataset.zone === room.id;
+        button.classList.toggle('active', active);
+        button.setAttribute?.('aria-pressed', String(active));
+      });
+    }
+
+    closeSettings() {
+      const settings = document.getElementById('settings-menu');
+      if (!settings?.open) return false;
+      settings.open = false;
+      return true;
+    }
+
+    closeToolDrawer() {
+      const drawer = document.getElementById('dock-wrapper');
+      if (!drawer || drawer.classList.contains('collapsed')) return false;
+      drawer.classList.add('collapsed');
+      document.getElementById('dock-toggle-btn')?.setAttribute?.('aria-expanded', 'false');
+      return true;
     }
 
     bindUIButtons() {
+      const settings = document.getElementById('settings-menu');
+      const drawer = document.getElementById('dock-wrapper');
+      if (drawer) drawer.classList.add('collapsed');
+      window.addEventListener('pointerdown', (event) => {
+        if (settings?.open && !settings.contains(event.target)) this.closeSettings();
+        if (drawer?.contains && !drawer.contains(event.target)) this.closeToolDrawer();
+      });
+
       // 声音切换
       const soundBtn = document.getElementById('btn-sound');
       if (soundBtn) {
         soundBtn.onclick = () => {
           soundEngine.setMuted(!soundEngine.isMuted);
-          soundBtn.innerText = soundEngine.isMuted ? '🔇 声音: 关' : '🔊 声音: 开';
+          soundBtn.innerText = soundEngine.isMuted ? '音效 · 关' : '音效 · 开';
+          soundBtn.setAttribute?.('aria-pressed', String(!soundEngine.isMuted));
         };
       }
 
@@ -896,14 +962,15 @@
           // @escape H4: 直写 soundEngine.bgmEnabled。audio.js 已提供 toggleBGM() 公开方法，
           // 此处是组合根直控 UI 状态的既有实现。标记使「故意例外」与「意外耦合」可区分（D3/H4）。
           soundEngine.bgmEnabled = !soundEngine.bgmEnabled;
+          bgmBtn.setAttribute?.('aria-pressed', String(soundEngine.bgmEnabled));
           if (soundEngine.bgmEnabled) {
             soundEngine.startLofiBGM();
-            bgmBtn.innerText = '🎵 音乐: 开';
+            bgmBtn.innerText = '音乐 · 开';
             bgmBtn.classList.add('active');
             uiManager.showToast('📻 已开启程序化生成 Lofi 治愈背景音乐~');
           } else {
             soundEngine.stopLofiBGM();
-            bgmBtn.innerText = '🎵 音乐: 关';
+            bgmBtn.innerText = '音乐 · 关';
             bgmBtn.classList.remove('active');
           }
         };
@@ -914,21 +981,21 @@
       if (weatherBtn) {
         weatherBtn.onclick = () => {
           const w = environment.toggleWeather();
-          const icons = { clear: '☀️ 晴空', rain: '🌧️ 细雨', fireflies: '✨ 萤火' };
-          weatherBtn.innerText = icons[w] || w;
-          uiManager.showToast(`🌤️ 天气已切换为: ${icons[w]}`);
+          const names = { clear: '晴空', rain: '细雨', fireflies: '萤火' };
+          weatherBtn.innerText = `天气 · ${names[w]}`;
         };
       }
 
       // 主题切换
       const themeBtn = document.getElementById('btn-theme');
       if (themeBtn) {
+        const names = { sunny_day: '日间', cozy_night: '夜间', cyber_neon: '霓虹' };
+        themeBtn.innerText = `时段 · ${names[environment.theme]}`;
         themeBtn.onclick = () => {
-          const themes = ['cozy_night', 'sunny_day', 'cyber_neon'];
+          const themes = Object.keys(names);
           const next = themes[(themes.indexOf(environment.theme) + 1) % themes.length];
           environment.setTheme(next);
-          const names = { cozy_night: '🌙 温馨夜', sunny_day: '☀️ 暖阳日', cyber_neon: '🌌 赛博夜' };
-          themeBtn.innerText = names[next];
+          themeBtn.innerText = `时段 · ${names[next]}`;
         };
       }
 
@@ -941,7 +1008,7 @@
           // 无公开写接口；组合根按 UI 按钮切换全局重力模式，属有意保留的逃逸点，登记以便审计。
           physicsWorld.gravityMode = isZero ? 'earth' : 'antigravity';
           antiBtn.classList.toggle('special-on', !isZero);
-          antiBtn.innerText = !isZero ? '🛸 反重力已激活！' : '🛸 反重力模式';
+          antiBtn.setAttribute?.('aria-pressed', String(!isZero));
 
           if (!isZero) {
             soundEngine.playPop();
@@ -974,14 +1041,14 @@
       if (clearBtn) {
         clearBtn.onclick = () => {
           this.toys.length = 0;
-          this.furniture = this.furniture.filter(f => f.type === 'cattree' || f.type === 'feeder');
-          for (let c of this.cats) {
-            c.inBox = null;
-            c.ridingObj = null;
+          this.furniture = this.furniture.filter(f => this.roomFurniture.has(f));
+          for (const c of this.cats) {
+            if ((c.inBox && !this.roomFurniture.has(c.inBox)) ||
+                (c.ridingObj && !this.roomFurniture.has(c.ridingObj))) MountSystem.dismount(c);
           }
           soundEngine.playPop();
           this.updateHud();
-          uiManager.showToast('🧹 已清理散落玩具（保留投喂机与爬架）！');
+          uiManager.showToast('已收起散落玩具和新增家具。');
         };
       }
 
@@ -998,9 +1065,8 @@
       const dockWrapper = document.getElementById('dock-wrapper');
       if (dockToggleBtn && dockWrapper) {
         dockToggleBtn.onclick = () => {
-          dockWrapper.classList.toggle('collapsed');
-          const isCollapsed = dockWrapper.classList.contains('collapsed');
-          dockToggleBtn.innerHTML = isCollapsed ? '▲ 展开侍奉坞' : '▼ 收起抽屉 (纯净吸猫)';
+          const collapsed = dockWrapper.classList.toggle('collapsed');
+          dockToggleBtn.setAttribute?.('aria-expanded', String(!collapsed));
         };
       }
 
@@ -1012,11 +1078,9 @@
     updateHud() {
       const catsEl = document.getElementById('stat-cats');
       const toysEl = document.getElementById('stat-toys');
-      const moodEl = document.getElementById('stat-mood');
 
       if (catsEl) catsEl.innerText = this.cats.length;
       if (toysEl) toysEl.innerText = this.toys.length + this.furniture.length;
-      if (moodEl) moodEl.innerText = (100 + this.cats.length * 8) + '%';
     }
 
     // 本地持久化储存
@@ -1058,7 +1122,7 @@
         });
 
         // 补齐 3000px 豪宅配套家具、猫爬架网络与空中天桥吊床
-        this.furniture.push(new WindowSill(240, this.height * 0.28, 200, 150));
+        this.furniture.push(new WindowSill(172, floorY * 0.36, 224, 150));
         this.furniture.push(new WallClimbLadder(360, floorY - 50, 3, 1, 65, 12, 70, -60));
         this.furniture.push(new CatTree(640, floorY));
         this.furniture.push(new WallPerch(820, floorY - 240, 130, 16));
@@ -1199,7 +1263,7 @@
     // 只把当前可见的世界切片 blit 到主画布，减少填充率。
     // 源矩形按缓存比例换算到后备像素（并扣掉切片原点），目标用世界 CSS 单位；
     // 主 ctx 已带 dpr + zoom + 相机变换，因此平移只改目标位置、缩放由 ctx 完成，不错位。
-    _drawCachedLayer(ctx, layer) {
+    _drawCachedLayer(ctx, layer, verticalPad = 0) {
       if (!layer) return;
       const r = this._visibleRange;
       const x0 = Math.max(0, Math.floor(r.left));
@@ -1211,9 +1275,15 @@
       const sx1 = Math.min(x1, sliceLeft + sliceW);
       if (sx1 <= sx0) return;
       const scale = layer._cacheDpr || 1;
-      ctx.drawImage(layer,
-        (sx0 - sliceLeft) * scale, 0, (sx1 - sx0) * scale, layer.height,
-        sx0, 0, sx1 - sx0, this.height);
+      const sourceX = (sx0 - sliceLeft) * scale;
+      const targetWidth = sx1 - sx0;
+      const sourceWidth = targetWidth * scale;
+      ctx.drawImage(layer, sourceX, 0, sourceWidth, layer.height, sx0, 0, targetWidth, this.height);
+      if (verticalPad > 0) {
+        ctx.drawImage(layer, sourceX, 0, sourceWidth, 1, sx0, -verticalPad, targetWidth, verticalPad);
+        ctx.drawImage(layer, sourceX, layer.height - 1, sourceWidth, 1,
+          sx0, this.height, targetWidth, verticalPad);
+      }
     }
 
     // 自适应画质：连续慢帧才降级，持续流畅才升级，避免在阈值附近来回抖动。
@@ -1239,8 +1309,6 @@
       }
       this._slowFrames = 0;
       this._fastFrames = 0;
-      const label = next === 'high' ? '高' : (next === 'medium' ? '均衡' : '流畅');
-      uiManager.showToast(`⚙️ 帧率自适应：已切换到「${label}」画质~`);
     }
 
     // --- 主帧渲染循环 ---
@@ -1274,8 +1342,14 @@
       }
 
       // 1. 相机与缩放平滑插值 (Lerp Smoothing)
-      this.cameraX = MathUtils.lerp(this.cameraX, this.targetCameraX, 0.1);
       this.zoom = MathUtils.lerp(this.zoom, this.targetZoom, 0.08);
+      if (Math.abs(this.zoom - this.targetZoom) < 0.001) {
+        this.zoom = this.targetZoom;
+        this._zoomTransition = false;
+      }
+      const maxCamX = Math.max(0, this.worldWidth - this.viewportWidth / this.zoom);
+      this.cameraX = MathUtils.clamp(MathUtils.lerp(this.cameraX, this.targetCameraX, 0.12), 0, maxCamX);
+      this.updateRoomNav();
 
       // 每帧重置变换到设备像素坐标系：clearRect 必须以 CSS 像素尺寸覆盖整个后备缓冲
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -1283,6 +1357,7 @@
 
       // --- 进入世界相机空间变换 ---
       ctx.save();
+      ctx.translate(0, this.sceneOffsetY);
       ctx.scale(this.zoom, this.zoom);
       ctx.translate(-this.cameraX, 0);
 
@@ -1294,7 +1369,7 @@
       //      天气粒子与飞鸟是动态层，逐帧单独绘制，不会被缓存冻结。
       environment.update(worldWidth, height);
       this._ensureBgLayer();
-      this._drawCachedLayer(ctx, this._bgLayer);
+      this._drawCachedLayer(ctx, this._bgLayer, this.sceneOffsetY / this.zoom);
       environment.drawWeatherParticles(ctx, worldWidth, height);
 
       // 3. 阳光光束 (动态，始终绘制)
@@ -1361,7 +1436,7 @@
           width: this.viewportWidth,
           height: this.viewportHeight
         };
-        const mouseWorld = this.getWorldPos ? this.getWorldPos(this.mouse.x, this.mouse.y) : null;
+        const mouseWorld = this.mouse.overScene ? this.mouse : null;
         window.CyberMeow.LabelClusterEngine.renderLabels(ctx, this.cats, viewport, {
           clusterMode: cfg.clusterMode || 'smart',
           catCam: this.catCam
@@ -1475,6 +1550,8 @@
 
       const handleMinimapPan = (e) => {
         const rect = canvas.getBoundingClientRect();
+        if (!rect.width) return;
+        this.catCam = null;
         const clickRatio = MathUtils.clamp((e.clientX - rect.left) / rect.width, 0, 1);
         const worldTargetX = clickRatio * this.worldWidth;
         const maxCamX = Math.max(0, this.worldWidth - this.viewportWidth / this.zoom);
@@ -1483,13 +1560,16 @@
 
       let isDown = false;
       container.addEventListener('pointerdown', (e) => {
+        if ((e.isPrimary === false && e.pointerType) || e.button !== 0) return;
         isDown = true;
+        container.setPointerCapture?.(e.pointerId);
         handleMinimapPan(e);
       });
       window.addEventListener('pointermove', (e) => {
         if (isDown) handleMinimapPan(e);
       });
       window.addEventListener('pointerup', () => { isDown = false; });
+      window.addEventListener('pointercancel', () => { isDown = false; });
     }
 
     renderMiniMap() {
@@ -1502,9 +1582,9 @@
       ctx.clearRect(0, 0, w, h);
 
       // 背景与豪宅三区分割线
-      ctx.fillStyle = '#181926';
+      ctx.fillStyle = '#e7e5d4';
       ctx.fillRect(0, 0, w, h);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.strokeStyle = '#c6c8b8';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(1000 * scaleX, 0); ctx.lineTo(1000 * scaleX, h);
@@ -1512,14 +1592,14 @@
       ctx.stroke();
 
       // 地平线
-      ctx.fillStyle = '#2c2d3e';
+      ctx.fillStyle = '#d5c8a9';
       ctx.fillRect(0, h - 6, w, 6);
 
       // 绘制猫咪实时光点
       for (const c of this.cats) {
         const mx = c.x * scaleX;
         const my = (c.y / this.height) * (h - 10) + 2;
-        ctx.fillStyle = c.breed ? c.breed.bodyColor : '#feca57';
+        ctx.fillStyle = c.breed ? c.breed.bodyColor : '#48705a';
         ctx.beginPath();
         ctx.arc(mx, MathUtils.clamp(my, 4, h - 6), 3, 0, Math.PI * 2);
         ctx.fill();
@@ -1528,9 +1608,9 @@
       // 视口取景框
       const viewW = (this.viewportWidth / this.zoom) * scaleX;
       const viewX = this.cameraX * scaleX;
-      ctx.strokeStyle = '#feca57';
+      ctx.strokeStyle = '#48705a';
       ctx.lineWidth = 1.5;
-      ctx.fillStyle = 'rgba(254, 202, 87, 0.12)';
+      ctx.fillStyle = 'rgba(69, 108, 84, 0.14)';
       ctx.fillRect(viewX, 1, viewW, h - 2);
       ctx.strokeRect(viewX, 1, viewW, h - 2);
     }

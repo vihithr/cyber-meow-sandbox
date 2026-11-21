@@ -5,30 +5,87 @@
 (function(window) {
   'use strict';
 
-  const { soundEngine, HATS } = window.CyberMeow;
+  const { soundEngine, HATS, Cat } = window.CyberMeow;
+
+  // Cell coordinates and mouth anchors in the 380 × 260 portrait artwork.
+  const STUDIO_PORTRAITS = {
+    blue:    { col: 0, row: 0, mouth: [317, 99] },
+    orange:  { col: 1, row: 0, mouth: [327, 106] },
+    tuxedo:  { col: 0, row: 1, mouth: [332, 95] },
+    white:   { col: 1, row: 1, mouth: [331, 98] },
+    calico:  { col: 0, row: 2, mouth: [326, 103] },
+    siamese: { col: 1, row: 2, mouth: [342, 96] }
+  };
+
+  let paintedStudioLayers;
+  function studioLayers() {
+    if (!paintedStudioLayers) {
+      paintedStudioLayers = ['studio-cats', 'studio-eyelids'].map(name => {
+        const image = new Image();
+        image.src = 'assets/' + name + '.webp';
+        return image;
+      });
+    }
+    return paintedStudioLayers;
+  }
+
+  function drawPaintedStudioCat(ctx, pose, expression, layers) {
+    const portrait = STUDIO_PORTRAITS[pose.breed.id];
+    const [coat, eyelids] = layers;
+    if (!portrait || !coat.complete || !coat.naturalWidth) return false;
+
+    const drawLayer = image => ctx.drawImage(image, portrait.col * 640, portrait.row * 440,
+      640, 440, 0, -255, 380, 260);
+    ctx.save();
+    // Keep all four paws on the cushion as the shoulders breathe and lean toward the hand.
+    ctx.translate(39, 205);
+    const scale = pose.hat === 'wizard' || pose.hat === 'party' ? .66 : .75;
+    const breath = Math.sin(pose.loafBreathe) * .006;
+    ctx.transform(scale, 0, -expression.gazeX * .016, scale * (1 + breath - expression.gazeY * .012), 0, 0);
+    drawLayer(coat);
+    if (eyelids.complete && eyelids.naturalWidth) {
+      ctx.globalAlpha = Math.max(expression.blink, expression.happy ? .97 : 0, expression.angry ? .34 : 0);
+      if (ctx.globalAlpha > .01) drawLayer(eyelids);
+      ctx.globalAlpha = 1;
+    }
+    const [mouthX, mouthY] = portrait.mouth;
+    if (expression.lick) {
+      ctx.fillStyle = '#d99191';
+      ctx.beginPath();
+      ctx.ellipse(mouthX + 1, mouthY - 253, 3.4, 5, -.20, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (pose.hat && pose.hat !== 'none') {
+      ctx.translate(mouthX - 15, mouthY - 281);
+      pose._drawProfileHat(ctx, 53, expression);
+    }
+    ctx.restore();
+    return true;
+  }
+
   const CHALLENGE_DURATION = 45;
 
   const BUILD_CATALOG = {
     cats: [
-      { id: 'cat', icon: '🐱', name: '召唤新猫咪', desc: '领养一只随机品种与性格的萌猫入住豪宅', action: '召唤' },
-      { id: 'fish', icon: '🐟', name: '香脆小鱼干', desc: '美味小鱼干零食，猫咪闻香飞奔吃掉补充饱腹度', action: '投喂' },
-      { id: 'catnip', icon: '🌿', name: '猫薄荷喷雾', desc: '快乐神草！让附近的猫咪陷入极乐打滚与兔子蹬', action: '喷洒' }
+      { id: 'cat', icon: '🐱', name: '领养猫咪', desc: '随机品种和性格', action: '召唤' },
+      { id: 'fish', icon: '🐟', name: '小鱼干', desc: '补充猫咪的饱腹度', action: '投喂' },
+      { id: 'catnip', icon: '🌿', name: '猫薄荷', desc: '让附近的猫咪打滚', action: '喷洒' }
     ],
     toys: [
-      { id: 'yarn', icon: '🧶', name: '弹力毛线球', desc: '带物理弹力的毛线球，猫咪扑咬蹬踹散落线段', action: '放置' },
-      { id: 'feather', icon: '🪶', name: '飘逸逗猫棒', desc: '挥动羽毛吸引小猫咪捕猎跳跃与扑击', action: '选用' },
-      { id: 'laser', icon: '🔴', name: '激光红点', desc: '在屏幕上移动，猫咪们会集体兴奋飞扑追逐', action: '选用' }
+      { id: 'yarn', icon: '🧶', name: '毛线球', desc: '能弹跳和滚动，可被猫咪推走', action: '放置' },
+      { id: 'feather', icon: '🪶', name: '逗猫棒', desc: '跟随光标移动，吸引猫咪扑跳', action: '选用' },
+      { id: 'laser', icon: '🔴', name: '激光笔', desc: '让猫咪追逐光标处的红点', action: '选用' }
     ],
     furniture: [
-      { id: 'box', icon: '📦', name: '经典纸箱', desc: '猫咪最爱的安乐窝，胖猫还会卡屁股变装甲车', action: '放置' },
-      { id: 'roomba', icon: '🤖', name: '智能扫地机', desc: '地面巡逻推撞障碍物，猫咪还能跳上去霸气骑乘', action: '放置' },
-      { id: 'scratcher', icon: '🪵', name: '瓦楞猫抓板', desc: '剑麻耐磨抓板，让猫咪磨爪解压保护家具', action: '放置' },
-      { id: 'recycle', icon: '🧹', name: '单体回收工具', desc: '点击任意散落玩具或家具将其一键温和回收', action: '选用' }
+      { id: 'box', icon: '📦', name: '纸箱', desc: '可以钻进去的纸箱窝', action: '放置' },
+      { id: 'roomba', icon: '🤖', name: '扫地机', desc: '在地面巡逻，猫咪可以搭乘', action: '放置' },
+      { id: 'scratcher', icon: '🪵', name: '猫抓板', desc: '给猫咪磨爪的地方', action: '放置' },
+      { id: 'recycle', icon: '🧹', name: '回收工具', desc: '点击单件玩具或家具收回', action: '选用' }
     ],
     structures: [
-      { id: 'cattree', icon: '🌳', name: '豪华猫爬架', desc: '三层跳台带红色吊球，猫咪可阶梯飞跃登顶俯瞰', action: '搭建' },
-      { id: 'bridge', icon: '🌉', name: '空中悬索天桥', desc: '跨越客厅上空的空中走廊，带木板受力下沉形变', action: '搭建' },
-      { id: 'hammock', icon: '☁️', name: '高空全景吊床', desc: '天花板悬吊双链软榻，单摆阻尼摆动与惬意午睡', action: '悬挂' }
+      { id: 'cattree', icon: '🌳', name: '猫爬架', desc: '带跳台和悬挂玩具的高架', action: '搭建' },
+      { id: 'bridge', icon: '🌉', name: '悬索天桥', desc: '猫咪经过时会轻轻下沉', action: '搭建' },
+      { id: 'hammock', icon: '☁️', name: '吊床', desc: '悬挂在半空，可以推动摇摆', action: '悬挂' }
     ]
   };
 
@@ -45,6 +102,7 @@
       this.studioCat = null;
       this.studioAnimId = null;
       this.toastTimer = null;
+      this.activeModal = null;
     }
 
     init() {
@@ -55,19 +113,62 @@
       this.bindRenderTunerEvents();
     }
 
+    showModal(modal, dismiss) {
+      if (this.activeModal === modal) return;
+      this.dismissModal();
+      this.activeModal = modal;
+      this.dismissModalAction = dismiss;
+      this.modalTrigger = document.activeElement;
+      const shell = document.getElementById('game-shell');
+      if (shell) shell.inert = true;
+      modal.classList.add('open');
+      modal.onclick = (event) => {
+        if (event.target === modal) this.dismissModal();
+      };
+      modal.onkeydown = (event) => {
+        if (event.key !== 'Tab') return;
+        const controls = [...modal.querySelectorAll('button, input, a[href]')]
+          .filter(control => !control.disabled && control.getClientRects().length);
+        const first = controls[0];
+        const last = controls.at(-1);
+        const edge = event.shiftKey ? first : last;
+        if (edge && document.activeElement === edge) {
+          event.preventDefault();
+          (event.shiftKey ? last : first).focus();
+        }
+      };
+      modal.querySelector?.('.btn-close, #btn-close-snapshot')?.focus();
+    }
+
+    hideModal(modal) {
+      if (!modal) return;
+      modal.classList.remove('open');
+      if (this.activeModal !== modal) return;
+      this.activeModal = null;
+      this.dismissModalAction = null;
+      const shell = document.getElementById('game-shell');
+      if (shell) shell.inert = false;
+      this.modalTrigger?.focus?.();
+      this.modalTrigger = null;
+    }
+
+    dismissModal() {
+      this.dismissModalAction?.();
+    }
+
     // --- 建造与摆放仓库系统 (Build Catalog) ---
     openBuildCatalog() {
       const modal = document.getElementById('build-catalog-modal');
       if (!modal) return;
       this.currentCatalogTab = this.currentCatalogTab || 'cats';
       this.renderCatalogGrid(this.currentCatalogTab);
-      modal.classList.add('open');
+      this.showModal(modal, () => this.closeBuildCatalog());
       soundEngine.playPop();
     }
 
     closeBuildCatalog() {
       const modal = document.getElementById('build-catalog-modal');
-      if (modal) modal.classList.remove('open');
+      this.hideModal(modal);
     }
 
     renderCatalogGrid(categoryKey) {
@@ -77,37 +178,30 @@
       container.innerHTML = '';
 
       document.querySelectorAll('.catalog-tab-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.tab === categoryKey);
+        const active = btn.dataset.tab === categoryKey;
+        btn.classList.toggle('active', active);
+        btn.setAttribute?.('aria-pressed', String(active));
       });
 
       const items = BUILD_CATALOG[categoryKey] || [];
       items.forEach(item => {
-        const card = document.createElement('div');
+        const card = document.createElement('button');
         card.className = 'catalog-item-card';
         card.innerHTML = `
-          <div class="catalog-item-icon">${item.icon}</div>
-          <div class="catalog-item-info">
-            <div class="catalog-item-title">${item.name}</div>
-            <div class="catalog-item-desc">${item.desc}</div>
-          </div>
-          <div class="catalog-item-action">
-            <button class="pill-btn active" style="padding: 6px 12px; font-size: 0.8rem;">${item.action}</button>
-          </div>
+          <span class="catalog-item-icon" aria-hidden="true">${item.icon}</span>
+          <span>
+            <span class="catalog-item-title">${item.name}</span>
+            <span class="catalog-item-desc">${item.desc}</span>
+          </span>
+          <span class="catalog-item-action" aria-hidden="true">${item.action} →</span>
         `;
-        const actionBtn = card.querySelector('button');
-        if (actionBtn) {
-          actionBtn.onclick = () => {
-            this.closeBuildCatalog();
-            const app = window.CyberMeow.app;
-            if (app) {
-              if (item.id === 'laser' || item.id === 'feather') {
-                app.setTool(item.id);
-              } else {
-                app.startPlacement(item.id);
-              }
-            }
-          };
-        }
+        card.onclick = () => {
+          this.closeBuildCatalog();
+          const app = window.CyberMeow.app;
+          if (!app) return;
+          if (['laser', 'feather', 'recycle'].includes(item.id)) app.setTool(item.id);
+          else app.startPlacement(item.id);
+        };
         container.appendChild(card);
       });
     }
@@ -148,13 +242,13 @@
       const modal = document.getElementById('render-tuner-modal');
       if (!modal) return;
       this.syncTunerUI();
-      modal.classList.add('open');
+      this.showModal(modal, () => this.closeRenderTuner());
       if (soundEngine?.playPop) soundEngine.playPop();
     }
 
     closeRenderTuner() {
       const modal = document.getElementById('render-tuner-modal');
-      if (modal) modal.classList.remove('open');
+      this.hideModal(modal);
     }
 
     syncTunerUI() {
@@ -268,10 +362,10 @@
       const hint = document.getElementById('hint-text');
       if (hint) {
         hint.innerText = msg;
-        hint.style.opacity = '1';
+        hint.style.opacity = msg ? '1' : '0';
         clearTimeout(this.toastTimer);
         this.toastTimer = setTimeout(() => {
-          hint.style.opacity = '0.7';
+          hint.style.opacity = '0';
         }, duration);
       }
     }
@@ -296,13 +390,13 @@
       this.renderHatOptions();
       this.drawPassportAvatar();
 
-      modal.classList.add('open');
+      this.showModal(modal, () => this.closeCatPassport());
       soundEngine.playMeow(cat.pitchMod, 'chirp');
     }
 
     closeCatPassport() {
       const modal = document.getElementById('passport-modal');
-      if (modal) modal.classList.remove('open');
+      this.hideModal(modal);
       this.selectedCat = null;
     }
 
@@ -323,69 +417,7 @@
       const ctx = avatarCanvas.getContext('2d');
       ctx.clearRect(0, 0, avatarCanvas.width, avatarCanvas.height);
 
-      ctx.save();
-      ctx.translate(avatarCanvas.width / 2, avatarCanvas.height / 2 + 10);
-      const cat = this.selectedCat;
-      const headR = 26;
-
-      // 耳朵
-      ctx.fillStyle = cat.breed.bodyColor;
-      ctx.beginPath();
-      ctx.moveTo(-headR * 0.8, -headR * 0.4);
-      ctx.lineTo(-headR * 0.7, -headR * 1.35);
-      ctx.lineTo(-headR * 0.1, -headR * 0.8);
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.moveTo(headR * 0.1, -headR * 0.8);
-      ctx.lineTo(headR * 0.7, -headR * 1.35);
-      ctx.lineTo(headR * 0.8, -headR * 0.4);
-      ctx.fill();
-
-      // 耳蜗
-      ctx.fillStyle = cat.breed.earColor;
-      ctx.beginPath();
-      ctx.moveTo(-headR * 0.6, -headR * 0.4);
-      ctx.lineTo(-headR * 0.55, -headR * 1.15);
-      ctx.lineTo(-headR * 0.2, -headR * 0.7);
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.moveTo(headR * 0.2, -headR * 0.7);
-      ctx.lineTo(headR * 0.55, -headR * 1.15);
-      ctx.lineTo(headR * 0.6, -headR * 0.4);
-      ctx.fill();
-
-      // 脸
-      ctx.beginPath();
-      ctx.arc(0, 0, headR, 0, Math.PI * 2);
-      ctx.fillStyle = cat.breed.bodyColor;
-      ctx.fill();
-
-      // 眼睛
-      ctx.fillStyle = cat.breed.eyeColor;
-      ctx.beginPath();
-      ctx.ellipse(-headR * 0.4, -2, 5, 6, 0, 0, Math.PI * 2);
-      ctx.ellipse(headR * 0.4, -2, 5, 6, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      // 瞳孔
-      ctx.fillStyle = '#111';
-      ctx.beginPath();
-      ctx.arc(-headR * 0.4, -2, 2.8, 0, Math.PI * 2);
-      ctx.arc(headR * 0.4, -2, 2.8, 0, Math.PI * 2);
-      ctx.fill();
-
-      // 鼻子
-      ctx.fillStyle = '#ff7675';
-      ctx.beginPath();
-      ctx.arc(0, 6, 2.5, 0, Math.PI * 2);
-      ctx.fill();
-
-      // 帽子
-      cat.drawHat(ctx, 0, headR);
-
-      ctx.restore();
+      this.selectedCat.drawPortrait(ctx, avatarCanvas.width);
     }
 
     renderHatOptions() {
@@ -443,10 +475,11 @@
 
       // 创建合成拍立得画布
       const snapCanvas = document.createElement('canvas');
-      const pad = 24;
-      const bottomExtra = 70;
-      snapCanvas.width = mainCanvas.width * 0.65;
-      snapCanvas.height = (mainCanvas.height * 0.65) + bottomExtra;
+      const photoWidth = Math.round(mainCanvas.width * 0.75);
+      const photoHeight = Math.round(mainCanvas.height * 0.75);
+      const pad = Math.max(8, Math.round(photoWidth * 0.024));
+      snapCanvas.width = photoWidth + pad * 2;
+      snapCanvas.height = photoHeight + pad * 2 + 34;
       const sctx = snapCanvas.getContext('2d');
 
       // 拍立得相纸白底
@@ -457,18 +490,17 @@
       sctx.drawImage(
         mainCanvas,
         0, 0, mainCanvas.width, mainCanvas.height,
-        pad, pad, snapCanvas.width - pad * 2, snapCanvas.height - bottomExtra - pad
+        pad, pad, photoWidth, photoHeight
       );
 
-      // 拍立得手写签名文字
-      sctx.fillStyle = '#2d3436';
-      sctx.font = 'bold 18px "Comic Sans MS", "PingFang SC", sans-serif';
-      sctx.fillText('🐾 CyberMeow Memories 🌸', pad + 10, snapCanvas.height - 30);
-
-      sctx.fillStyle = '#636e72';
-      sctx.font = '13px sans-serif';
-      const dateStr = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-      sctx.fillText(dateStr, snapCanvas.width - pad - 160, snapCanvas.height - 30);
+      sctx.fillStyle = '#315643';
+      sctx.font = 'bold 16px Georgia, serif';
+      sctx.fillText('CyberMeow', pad, snapCanvas.height - 14, photoWidth);
+      if (photoWidth > 220) {
+        sctx.textAlign = 'right';
+        sctx.font = '12px sans-serif';
+        sctx.fillText(new Date().toLocaleDateString('zh-CN'), snapCanvas.width - pad, snapCanvas.height - 14);
+      }
 
       let dataUrl;
       try {
@@ -490,18 +522,17 @@
           a.click();
           this.showToast('📸 拍立得相片已下载保存！');
         };
-        modal.classList.add('open');
+        this.showModal(modal, () => this.closeSnapshot());
       }
+    }
+
+    closeSnapshot() {
+      this.hideModal(document.getElementById('snapshot-modal'));
     }
 
     bindSnapshotEvents() {
       const closeBtn = document.getElementById('btn-close-snapshot');
-      if (closeBtn) {
-        closeBtn.onclick = () => {
-          const modal = document.getElementById('snapshot-modal');
-          if (modal) modal.classList.remove('open');
-        };
-      }
+      if (closeBtn) closeBtn.onclick = () => this.closeSnapshot();
     }
 
     // --- 红点追逐大作战 (Laser Rush Challenge) ---
@@ -515,6 +546,7 @@
 
     startLaserChallenge(sceneContext) {
       this.challengeActive = true;
+      document.getElementById('btn-challenge')?.setAttribute?.('aria-pressed', 'true');
       this.challengeTime = CHALLENGE_DURATION;
       this.challengeScore = 0;
       // 记录进入挑战前的工具，结束时恢复，避免玩家被困在激光笔模式
@@ -620,6 +652,7 @@
 
     stopLaserChallenge() {
       this.challengeActive = false;
+      document.getElementById('btn-challenge')?.setAttribute?.('aria-pressed', 'false');
       clearInterval(this.challengeTimer);
       this.challengeTimer = null;
       this.targetStar = null;
@@ -647,17 +680,18 @@
       this.studioCollectedFur = 0;
       this.studioBiteCooldown = 0;
       this.studioScreenShake = 0;
+      this.studioGaze = { x: 0, y: 0 };
 
       const modal = document.getElementById('studio-modal');
       const title = document.getElementById('studio-cat-name');
       const furBanner = document.getElementById('studio-fur-banner');
       if (!modal) return;
 
-      if (title) title.innerText = `与「${cat.name}」的亲密时光 🐾`;
+      if (title) title.innerText = `照顾 ${cat.name}`;
       if (furBanner) furBanner.style.display = 'none';
 
       this.updateStudioPatienceUI();
-      modal.classList.add('open');
+      this.showModal(modal, () => this.closeCloseUpStudio());
 
       soundEngine.playMeow(cat.pitchMod, 'pleading');
       this.startStudioAnimation();
@@ -666,7 +700,7 @@
 
     closeCloseUpStudio() {
       const modal = document.getElementById('studio-modal');
-      if (modal) modal.classList.remove('open');
+      this.hideModal(modal);
       this.studioCat = null;
       clearTimeout(this.biteRecoverTimer);
       this.biteRecoverTimer = null;
@@ -685,17 +719,17 @@
       bar.style.width = pct + '%';
 
       if (pct > 65) {
-        bar.style.background = '#2ed573';
+        bar.style.background = '#4d7950';
         tag.innerText = '🥰 极度舒适';
-        tag.style.color = '#2ed573';
+        tag.style.color = '#4d7950';
       } else if (pct > 25) {
-        bar.style.background = '#ffa502';
+        bar.style.background = '#9a611c';
         tag.innerText = '⚠️ 尾巴微甩，注意别一直摸肚皮';
-        tag.style.color = '#ffa502';
+        tag.style.color = '#9a611c';
       } else {
-        bar.style.background = '#ff4757';
+        bar.style.background = '#a5433d';
         tag.innerText = '😾 飞机耳！随时亮爪抱咬！';
-        tag.style.color = '#ff4757';
+        tag.style.color = '#a5433d';
       }
     }
 
@@ -714,6 +748,13 @@
     bindStudioEvents() {
       const closeBtn = document.getElementById('btn-close-studio');
       if (closeBtn) closeBtn.onclick = () => this.closeCloseUpStudio();
+      const passportBtn = document.getElementById('btn-studio-passport');
+      if (passportBtn) passportBtn.onclick = () => {
+        const cat = this.studioCat;
+        if (!cat) return;
+        this.closeCloseUpStudio();
+        this.openCatPassport(cat);
+      };
 
       document.querySelectorAll('.studio-tool-btn').forEach(btn => {
         btn.onclick = () => {
@@ -750,17 +791,19 @@
         isDown = true;
         soundEngine.init();
         const rect = canvas.getBoundingClientRect();
-        lastX = e.clientX - rect.left;
-        lastY = e.clientY - rect.top;
+        lastX = (e.clientX - rect.left) * 380 / rect.width;
+        lastY = (e.clientY - rect.top) * 240 / rect.height;
         this.interactStudio(lastX, lastY);
       };
 
       const onPointerMove = (e) => {
-        if (!isDown) return;
+        if (!this.studioCat || (!isDown && e.target !== canvas)) return;
         const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        if (Math.hypot(x - lastX, y - lastY) > 16) {
+        const x = (e.clientX - rect.left) * 380 / rect.width;
+        const y = (e.clientY - rect.top) * 240 / rect.height;
+        this.studioGaze.x = Math.max(-1, Math.min(1, (x - 271) / 105));
+        this.studioGaze.y = Math.max(-1, Math.min(1, (y - 104) / 80));
+        if (isDown && Math.hypot(x - lastX, y - lastY) > 16) {
           this.interactStudio(x, y);
           lastX = x;
           lastY = y;
@@ -775,6 +818,7 @@
       canvas.addEventListener('pointerdown', onPointerDown);
       window.addEventListener('pointermove', onPointerMove);
       window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerUp);
     }
 
     interactStudio(x, y) {
@@ -782,7 +826,10 @@
       if (this.studioBiteCooldown > 0) return; // 被咬后的傲娇冷却期
 
       const cat = this.studioCat;
-      const isBellyZone = y > 140; // 肚皮禁区判定！
+      const head = ((x - 271) / 42) ** 2 + ((y - 94) / 47) ** 2;
+      const body = ((x - 172) / 93) ** 2 + ((y - 131) / 39) ** 2;
+      if (head > 1 && body > 1) return;
+      const isBellyZone = body <= 1 && x < 206 && y > 142; // 肚皮禁区判定！
 
       if (isBellyZone && this.studioTool !== 'churu') {
         // 摸肚皮：高风险高过载！
@@ -903,184 +950,204 @@
       const canvas = document.getElementById('studio-canvas');
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
+      const logicalWidth = 380;
+      const logicalHeight = 240;
+      const footY = 205;
+      const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+      const pixelWidth = Math.round(logicalWidth * dpr);
+      const pixelHeight = Math.round(logicalHeight * dpr);
 
-      // 画布尺寸只在初始化时设置；写 width/height 会清空缓冲并重置上下文，不能每帧执行
-      if (canvas.width !== 380) canvas.width = 380;
-      if (canvas.height !== 240) canvas.height = 240;
+      // 保持 380x240 逻辑坐标，仅按设备像素比提高画布后备分辨率。
+      if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+      if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
       // 快速反复打开侍奉台时，先取消上一轮循环，避免两个 rAF 同时写同一画布
       cancelAnimationFrame(this.studioAnimId);
 
+      const backdrop = new Image();
+      backdrop.decoding = 'async';
+      backdrop.src = 'assets/studio-window.webp';
+      const layers = studioLayers();
+
+      const fallback = document.createElement('canvas');
+      fallback.width = pixelWidth;
+      fallback.height = pixelHeight;
+      const fallbackCtx = fallback.getContext('2d');
+      fallbackCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      fallbackCtx.imageSmoothingEnabled = true;
+      fallbackCtx.imageSmoothingQuality = 'high';
+
+      // 图片加载前或加载失败时使用：暖窗光、低对比窗框与厚实织物坐垫。
+      const wall = fallbackCtx.createLinearGradient(0, 0, 0, logicalHeight);
+      wall.addColorStop(0, '#eee7d5');
+      wall.addColorStop(.58, '#e7d8bd');
+      wall.addColorStop(1, '#c49c73');
+      fallbackCtx.fillStyle = wall;
+      fallbackCtx.fillRect(0, 0, logicalWidth, logicalHeight);
+
+      const daylight = fallbackCtx.createRadialGradient(316, 8, 8, 316, 8, 285);
+      daylight.addColorStop(0, 'rgba(255, 250, 218, .96)');
+      daylight.addColorStop(.38, 'rgba(255, 236, 184, .58)');
+      daylight.addColorStop(1, 'rgba(255, 224, 168, 0)');
+      fallbackCtx.fillStyle = daylight;
+      fallbackCtx.fillRect(0, 0, logicalWidth, logicalHeight);
+
+      const glass = fallbackCtx.createLinearGradient(22, 12, 356, 178);
+      glass.addColorStop(0, '#e8edda');
+      glass.addColorStop(.48, '#f7edcd');
+      glass.addColorStop(1, '#b9c8ae');
+      fallbackCtx.beginPath();
+      fallbackCtx.roundRect(20, 10, 340, 166, 11);
+      fallbackCtx.fillStyle = glass;
+      fallbackCtx.fill();
+
+      fallbackCtx.save();
+      fallbackCtx.beginPath();
+      fallbackCtx.roundRect(20, 10, 340, 166, 11);
+      fallbackCtx.clip();
+      fallbackCtx.fillStyle = 'rgba(105, 132, 102, .13)';
+      fallbackCtx.beginPath();
+      fallbackCtx.ellipse(64, 166, 92, 48, -.18, 0, Math.PI * 2);
+      fallbackCtx.ellipse(322, 171, 105, 57, .16, 0, Math.PI * 2);
+      fallbackCtx.fill();
+      fallbackCtx.fillStyle = 'rgba(255, 255, 239, .19)';
+      fallbackCtx.beginPath();
+      fallbackCtx.moveTo(250, 10);
+      fallbackCtx.lineTo(360, 10);
+      fallbackCtx.lineTo(214, 176);
+      fallbackCtx.lineTo(100, 176);
+      fallbackCtx.closePath();
+      fallbackCtx.fill();
+      fallbackCtx.restore();
+
+      fallbackCtx.strokeStyle = 'rgba(244, 231, 204, .78)';
+      fallbackCtx.lineWidth = 5;
+      fallbackCtx.beginPath();
+      fallbackCtx.roundRect(20, 10, 340, 166, 11);
+      fallbackCtx.stroke();
+      fallbackCtx.strokeStyle = 'rgba(92, 103, 87, .13)';
+      fallbackCtx.lineWidth = 8;
+      fallbackCtx.beginPath();
+      fallbackCtx.moveTo(88, 15);
+      fallbackCtx.lineTo(88, 172);
+      fallbackCtx.moveTo(292, 15);
+      fallbackCtx.lineTo(292, 172);
+      fallbackCtx.moveTo(25, 86);
+      fallbackCtx.lineTo(355, 86);
+      fallbackCtx.stroke();
+      fallbackCtx.strokeStyle = 'rgba(255, 250, 232, .55)';
+      fallbackCtx.lineWidth = 2;
+      fallbackCtx.beginPath();
+      fallbackCtx.moveTo(72, 18);
+      fallbackCtx.lineTo(72, 176);
+      fallbackCtx.moveTo(276, 18);
+      fallbackCtx.lineTo(276, 176);
+      fallbackCtx.stroke();
+
+      const sill = fallbackCtx.createLinearGradient(0, 174, 0, 194);
+      sill.addColorStop(0, 'rgba(238, 222, 192, .92)');
+      sill.addColorStop(1, 'rgba(147, 113, 82, .22)');
+      fallbackCtx.fillStyle = sill;
+      fallbackCtx.fillRect(12, 175, 356, 17);
+
+      fallbackCtx.save();
+      fallbackCtx.translate(183, 217);
+      fallbackCtx.fillStyle = 'rgba(61, 45, 34, .18)';
+      fallbackCtx.beginPath();
+      fallbackCtx.ellipse(0, 10, 158, 24, 0, 0, Math.PI * 2);
+      fallbackCtx.fill();
+
+      const cushionSide = fallbackCtx.createLinearGradient(0, 187, 0, 238);
+      cushionSide.addColorStop(0, '#8d6b55');
+      cushionSide.addColorStop(1, '#63493d');
+      fallbackCtx.fillStyle = cushionSide;
+      fallbackCtx.beginPath();
+      fallbackCtx.ellipse(0, 0, 145, 25, 0, 0, Math.PI * 2);
+      fallbackCtx.fill();
+
+      const cushionTop = fallbackCtx.createLinearGradient(-105, 174, 112, 218);
+      cushionTop.addColorStop(0, '#ba9270');
+      cushionTop.addColorStop(.55, '#a37b5f');
+      cushionTop.addColorStop(1, '#816149');
+      fallbackCtx.fillStyle = cushionTop;
+      fallbackCtx.beginPath();
+      fallbackCtx.ellipse(0, -12, 147, 26, 0, 0, Math.PI * 2);
+      fallbackCtx.fill();
+
+      fallbackCtx.strokeStyle = 'rgba(235, 211, 176, .44)';
+      fallbackCtx.lineWidth = 1.4;
+      fallbackCtx.setLineDash([4, 5]);
+      fallbackCtx.beginPath();
+      fallbackCtx.ellipse(0, -11, 133, 19, 0, 0, Math.PI * 2);
+      fallbackCtx.stroke();
+      fallbackCtx.setLineDash([]);
+      fallbackCtx.strokeStyle = 'rgba(59, 42, 33, .25)';
+      fallbackCtx.lineWidth = 1.2;
+      fallbackCtx.beginPath();
+      fallbackCtx.moveTo(-139, 3);
+      fallbackCtx.quadraticCurveTo(0, 28, 139, 3);
+      fallbackCtx.stroke();
+      fallbackCtx.restore();
+
+      const cat = this.studioCat;
+      const pose = new Cat({
+        x: 177, y: footY - 63, radius: 63, facing: 1, vx: 0, state: 'idle',
+        breed: cat.breed, hat: cat.hat, dna: cat.dna, age: cat.age,
+        bcs: cat.bcs, fluff: cat.fluff, personality: cat.personality
+      });
+      let gazeX = 0;
+      let gazeY = 0;
+      const startedAt = performance.now();
+
       const render = () => {
         if (!this.studioCat) return;
-        const cat = this.studioCat;
-        const w = 380;
-        const h = 240;
+        ctx.clearRect(0, 0, logicalWidth, logicalHeight);
+        if (backdrop.complete && backdrop.naturalWidth > 0) {
+          ctx.drawImage(backdrop, 0, 0, logicalWidth, logicalHeight);
+        } else {
+          ctx.drawImage(fallback, 0, 0, logicalWidth, logicalHeight);
+        }
 
-        ctx.clearRect(0, 0, w, h);
-
-        // 1. 柔软舒适的毛绒大坐垫
-        ctx.save();
-        ctx.translate(w / 2, h - 35);
+        // 图片背景的坐垫已包含体积，这里只统一压住脚底接触关系。
+        const contactShadow = ctx.createRadialGradient(198, footY - 1, 4, 198, footY - 1, 112);
+        contactShadow.addColorStop(0, 'rgba(48, 31, 24, .34)');
+        contactShadow.addColorStop(.42, 'rgba(55, 36, 27, .18)');
+        contactShadow.addColorStop(1, 'rgba(55, 36, 27, 0)');
+        ctx.fillStyle = contactShadow;
         ctx.beginPath();
-        ctx.ellipse(0, 0, 150, 26, 0, 0, Math.PI * 2);
-        ctx.fillStyle = '#ff7675';
+        ctx.ellipse(198, footY - 1, 112, 12, 0, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = '#d63031';
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
 
-        // 坐垫绒毛花边
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([4, 4]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.restore();
-
-        // 2. 猫咪大特写绘制 (居中坐姿，大头呆萌)
         ctx.save();
-        let shakeX = 0, shakeY = 0;
         if (this.studioScreenShake > 0) {
-          shakeX = (Math.random() - 0.5) * this.studioScreenShake;
-          shakeY = (Math.random() - 0.5) * this.studioScreenShake;
-          this.studioScreenShake *= 0.88;
-          if (this.studioScreenShake < 0.5) this.studioScreenShake = 0;
+          const shake = this.studioScreenShake;
+          ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake);
+          this.studioScreenShake = shake < .5 ? 0 : shake * .88;
         }
         if (this.studioBiteCooldown > 0) this.studioBiteCooldown--;
-
-        ctx.translate(w / 2 + shakeX, h - 90 + shakeY);
-        const breath = Math.sin(Date.now() * 0.004) * 2;
         const isHappy = this.studioPurrTimer > 0;
         const isAngry = this.studioBiteCooldown > 60 || this.studioPatience < 25;
         if (this.studioPurrTimer > 0) this.studioPurrTimer--;
         if (this.studioTongueOut > 0) this.studioTongueOut--;
 
-        // 身体
-        ctx.beginPath();
-        ctx.ellipse(0, 20 + breath, 52, 44, 0, 0, Math.PI * 2);
-        ctx.fillStyle = cat.breed.bodyColor;
-        ctx.fill();
-
-        // 肚皮
-        ctx.beginPath();
-        ctx.ellipse(0, 24 + breath, 32, 28, 0, 0, Math.PI * 2);
-        ctx.fillStyle = cat.breed.bellyColor;
-        ctx.fill();
-
-        // 头部
-        const headR = 46;
-        const headY = -18 + breath * 0.5;
-
-        // 耳朵 (舒服时微撇，过载生气时成愤怒飞机耳)
-        ctx.fillStyle = cat.breed.bodyColor;
-        const earSplay = isAngry ? 0.65 : (isHappy ? 0.2 : 0);
-        ctx.save();
-        ctx.rotate(-earSplay);
-        ctx.beginPath();
-        ctx.moveTo(-headR * 0.8, headY - 8);
-        ctx.lineTo(-headR * 0.75, headY - headR * 1.4);
-        ctx.lineTo(-headR * 0.15, headY - headR * 0.8);
-        ctx.fill();
-        ctx.fillStyle = cat.breed.earColor;
-        ctx.beginPath();
-        ctx.moveTo(-headR * 0.65, headY - 8);
-        ctx.lineTo(-headR * 0.6, headY - headR * 1.2);
-        ctx.lineTo(-headR * 0.2, headY - headR * 0.7);
-        ctx.fill();
-        ctx.restore();
-
-        // 右耳
-        ctx.save();
-        ctx.rotate(earSplay);
-        ctx.fillStyle = cat.breed.bodyColor;
-        ctx.beginPath();
-        ctx.moveTo(headR * 0.15, headY - headR * 0.8);
-        ctx.lineTo(headR * 0.75, headY - headR * 1.4);
-        ctx.lineTo(headR * 0.8, headY - 8);
-        ctx.fill();
-        ctx.fillStyle = cat.breed.earColor;
-        ctx.beginPath();
-        ctx.moveTo(headR * 0.2, headY - headR * 0.7);
-        ctx.lineTo(headR * 0.6, headY - headR * 1.2);
-        ctx.lineTo(headR * 0.65, headY - 8);
-        ctx.fill();
-        ctx.restore();
-
-        // 大圆脸
-        ctx.beginPath();
-        ctx.arc(0, headY, headR, 0, Math.PI * 2);
-        ctx.fillStyle = cat.breed.bodyColor;
-        ctx.fill();
-
-        // 眼睛 (舒服眯眼 / 愤怒竖瞳 / 正常大圆眼)
-        if (isAngry) {
-          // 生气过载：细长竖瞳
-          ctx.fillStyle = cat.breed.eyeColor;
-          ctx.beginPath();
-          ctx.ellipse(-headR * 0.4, headY - 3, 7, 10, -0.15, 0, Math.PI * 2);
-          ctx.ellipse(headR * 0.4, headY - 3, 7, 10, 0.15, 0, Math.PI * 2);
-          ctx.fill();
-
-          ctx.fillStyle = '#111';
-          ctx.beginPath();
-          ctx.ellipse(-headR * 0.4, headY - 3, 2, 8.5, 0, 0, Math.PI * 2);
-          ctx.ellipse(headR * 0.4, headY - 3, 2, 8.5, 0, 0, Math.PI * 2);
-          ctx.fill();
-        } else if (isHappy) {
-          ctx.strokeStyle = '#2d3436';
-          ctx.lineWidth = 3.5;
-          ctx.beginPath();
-          ctx.arc(-headR * 0.4, headY - 3, 8, Math.PI, 0);
-          ctx.arc(headR * 0.4, headY - 3, 8, Math.PI, 0);
-          ctx.stroke();
-        } else {
-          // 宝石大圆眼
-          ctx.fillStyle = cat.breed.eyeColor;
-          ctx.beginPath();
-          ctx.ellipse(-headR * 0.4, headY - 3, 9, 11, 0, 0, Math.PI * 2);
-          ctx.ellipse(headR * 0.4, headY - 3, 9, 11, 0, 0, Math.PI * 2);
-          ctx.fill();
-
-          ctx.fillStyle = '#111';
-          ctx.beginPath();
-          ctx.arc(-headR * 0.4, headY - 3, 5, 0, Math.PI * 2);
-          ctx.arc(headR * 0.4, headY - 3, 5, 0, Math.PI * 2);
-          ctx.fill();
-
-          ctx.fillStyle = '#fff';
-          ctx.beginPath();
-          ctx.arc(-headR * 0.4 - 2, headY - 6, 3, 0, Math.PI * 2);
-          ctx.arc(headR * 0.4 - 2, headY - 6, 3, 0, Math.PI * 2);
-          ctx.fill();
+        gazeX += (this.studioGaze.x - gazeX) * .13;
+        gazeY += (this.studioGaze.y - gazeY) * .13;
+        pose.loafBreathe = performance.now() * .003;
+        const blinkPhase = (performance.now() - startedAt + 1100) % 3600;
+        const expression = {
+          tilt: -.035 + gazeX * .045,
+          gazeX: .12 + gazeX * .55,
+          gazeY: gazeY * .60,
+          blink: Math.max(0, 1 - Math.abs(blinkPhase - 3420) / 92),
+          happy: isHappy,
+          angry: isAngry,
+          lick: this.studioTongueOut > 0
+        };
+        if (!drawPaintedStudioCat(ctx, pose, expression, layers)) {
+          pose.render(ctx, logicalWidth, logicalHeight, { suppressIndividualLabels: true, profile: expression });
         }
-
-        // 鼻子
-        ctx.fillStyle = '#ff7675';
-        ctx.beginPath();
-        ctx.arc(0, headY + 8, 4.5, 0, Math.PI * 2);
-        ctx.fill();
-
-        // 吃猫条舌头动画
-        if (this.studioTongueOut > 0) {
-          ctx.fillStyle = '#ff9ff3';
-          ctx.beginPath();
-          ctx.arc(0, headY + 16, 7, 0, Math.PI);
-          ctx.fill();
-        }
-
-        // 胡须
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-        ctx.lineWidth = 1.8;
-        ctx.beginPath();
-        ctx.moveTo(-15, headY + 9); ctx.lineTo(-45, headY + 5);
-        ctx.moveTo(-15, headY + 13); ctx.lineTo(-45, headY + 16);
-        ctx.moveTo(15, headY + 9); ctx.lineTo(45, headY + 5);
-        ctx.moveTo(15, headY + 13); ctx.lineTo(45, headY + 16);
-        ctx.stroke();
-
-        // 佩戴帽子
-        cat.drawHat(ctx, headY, headR);
-
         ctx.restore();
 
         // 3. 互动飘飞粒子渲染
@@ -1173,13 +1240,13 @@
           let minY = Infinity;
           members.forEach(m => {
             sumX += m.x;
-            if (m.y < minY) minY = m.y;
+            minY = Math.min(minY, (m.visualFootY ?? m.y) - (m.radius || 22) * 2.25);
           });
           clusters.push({
             id: `cluster_${root}`,
             cats: members,
             cx: sumX / members.length,
-            cy: minY - 36,
+            cy: minY - 9,
             count: members.length
           });
         } else {
@@ -1219,7 +1286,7 @@
           yOffset = -14; // 相邻猫咪 Y 轴梯级错开避让
         }
 
-        const isHovered = mouseWorld && Math.hypot(mouseWorld.x - cat.x, mouseWorld.y - (cat.y - 30)) < 36;
+        const isHovered = mouseWorld && Math.hypot(mouseWorld.x - cat.x, mouseWorld.y - ((cat.visualFootY ?? cat.y) - 30)) < 36;
         const isFocus = (cat.isGrabbed || isHovered || cat === config.catCam);
 
         this._drawSingleCatLabel(ctx, cat, mode, isFocus, yOffset);
@@ -1231,7 +1298,7 @@
     _drawClusterCapsule(ctx, cluster, isHovered, mode) {
       const { cx, cy, cats, count } = cluster;
       const names = cats.map(c => c.name).join('·');
-      const label = `🐾 ${count}猫贴贴: ${names}`;
+      const label = isHovered ? names : `${count} 只猫`;
 
       ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
       const textW = ctx.measureText(label).width;
@@ -1243,8 +1310,8 @@
       ctx.translate(cx, cy);
 
       // 半透明磨砂胶囊底盘
-      ctx.fillStyle = isHovered ? 'rgba(255, 107, 129, 0.88)' : 'rgba(20, 24, 35, 0.72)';
-      ctx.strokeStyle = isHovered ? '#ff6b81' : 'rgba(255, 255, 255, 0.35)';
+      ctx.fillStyle = isHovered ? '#315643' : 'rgba(39, 57, 44, 0.9)';
+      ctx.strokeStyle = isHovered ? '#d9dcb9' : 'rgba(255, 253, 246, 0.52)';
       ctx.lineWidth = 1.2;
       ctx.beginPath();
       if (ctx.roundRect) {
@@ -1283,14 +1350,14 @@
 
     _drawSingleCatLabel(ctx, cat, mode, isFocus, yOffset = 0) {
       const R = cat.radius || 22;
-      const topY = cat.y - R * 1.8 + yOffset;
+      const topY = (cat.visualFootY ?? cat.y) - R * 2.2 + yOffset;
 
       ctx.save();
       ctx.translate(cat.x, topY);
 
       if (mode === 'minimal' && !isFocus) {
         // 极简微标模式：常态仅显示微光点
-        ctx.fillStyle = (cat.purrLevel > 0) ? '#2ed573' : 'rgba(255, 255, 255, 0.45)';
+        ctx.fillStyle = (cat.purrLevel > 0) ? '#4d7950' : 'rgba(255, 255, 255, 0.45)';
         ctx.beginPath();
         ctx.arc(0, 0, 3, 0, Math.PI * 2);
         ctx.fill();
@@ -1304,8 +1371,8 @@
       if (isFocus) {
         // 焦点态/悬停态：展开详细名牌与高亮光晕
         const pillW = nameW + 28;
-        ctx.fillStyle = 'rgba(16, 20, 30, 0.85)';
-        ctx.strokeStyle = '#feca57';
+        ctx.fillStyle = '#315643';
+        ctx.strokeStyle = '#f5eee0';
         ctx.lineWidth = 1.2;
         ctx.beginPath();
         if (ctx.roundRect) {
@@ -1319,11 +1386,11 @@
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(`✨ ${cat.name}`, 0, -7);
+        ctx.fillText(cat.name, 0, -7);
       } else {
         // 常态紧凑微标
         const pillW = nameW + 12;
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+        ctx.fillStyle = 'rgba(39, 57, 44, 0.73)';
         ctx.beginPath();
         if (ctx.roundRect) {
           ctx.roundRect(-pillW / 2, -14, pillW, 14, 7);
@@ -1340,9 +1407,9 @@
 
       // 气泡与徽章
       if (cat.bubbleTimer > 0 && cat.bubbleText) {
-        cat.drawSpeechBubble(ctx, -20);
+        cat.drawSpeechBubble(ctx, -20, true);
       } else if (cat.intentIcon && isFocus) {
-        cat.drawIntentBadge(ctx, -20);
+        cat.drawIntentBadge(ctx, -20, true);
       }
 
       ctx.restore();

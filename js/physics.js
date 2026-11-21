@@ -129,6 +129,145 @@
     }
   }
 
+  // 单向落脚面扫掠解算：在单帧位移内寻找最先穿越的平台或地面。
+  const LandingResolver = {
+    EPSILON: 1e-7,
+
+    getSurfaceBounds(surface) {
+      const hasEndpoints = Number.isFinite(surface.x1) && Number.isFinite(surface.x2) &&
+        Number.isFinite(surface.y1) && Number.isFinite(surface.y2);
+      if (hasEndpoints) {
+        return {
+          minX: Math.min(surface.x1, surface.x2),
+          maxX: Math.max(surface.x1, surface.x2)
+        };
+      }
+
+      const centerX = Number.isFinite(surface.x) ? surface.x : 0;
+      const width = Number.isFinite(surface.w) ? surface.w : 60;
+      return { minX: centerX - width / 2, maxX: centerX + width / 2 };
+    },
+
+    getSurfaceYAt(surface, x) {
+      if (Number.isFinite(surface.x1) && Number.isFinite(surface.x2) &&
+          Number.isFinite(surface.y1) && Number.isFinite(surface.y2)) {
+        const dx = surface.x2 - surface.x1;
+        if (Math.abs(dx) > this.EPSILON) {
+          return surface.y1 + (x - surface.x1) * (surface.y2 - surface.y1) / dx;
+        }
+        return surface.y1;
+      }
+
+      const centerX = Number.isFinite(surface.x) ? surface.x : 0;
+      const centerY = Number.isFinite(surface.y) ? surface.y : 0;
+      let slope = 0;
+      if (Number.isFinite(surface.slope)) {
+        slope = surface.slope;
+      } else if (Number.isFinite(surface.angle)) {
+        slope = Math.tan(surface.angle);
+      }
+      return centerY + (x - centerX) * slope;
+    },
+
+    findFirst(options = {}) {
+      const {
+        startX,
+        startY,
+        endX,
+        endY,
+        radius = 0,
+        surfaces = [],
+        floorY = null,
+        edgePadding = 6,
+        surfaceSkin = 1,
+        isContinuingSurface = null
+      } = options;
+
+      if (![startX, startY, endX, endY].every(Number.isFinite)) return null;
+
+      const safeRadius = Math.max(0, Number.isFinite(radius) ? radius : 0);
+      const safeSurfaceSkin = Math.max(0, Number.isFinite(surfaceSkin) ? surfaceSkin : 0);
+      const safeEdgePadding = Number.isFinite(edgePadding) ? Math.max(0, edgePadding) : 6;
+      const surfaceList = Array.isArray(surfaces) ? surfaces : [];
+      const startFeetY = startY + safeRadius;
+      const endFeetY = endY + safeRadius;
+      let firstHit = null;
+
+      for (const surface of surfaceList) {
+        if (!surface) continue;
+
+        const bounds = this.getSurfaceBounds(surface);
+        const startWithinBounds = startX >= bounds.minX - safeEdgePadding &&
+          startX <= bounds.maxX + safeEdgePadding;
+        const endWithinBounds = endX >= bounds.minX - safeEdgePadding &&
+          endX <= bounds.maxX + safeEdgePadding;
+        const startGap = startFeetY - this.getSurfaceYAt(surface, startX);
+        const endGap = endFeetY - this.getSurfaceYAt(surface, endX);
+        const travel = endGap - startGap;
+        const exactContact = startWithinBounds &&
+          startGap >= -this.EPSILON && startGap <= this.EPSILON;
+        const markedContact = typeof isContinuingSurface === 'function' &&
+          startWithinBounds && startGap <= safeSurfaceSkin + this.EPSILON &&
+          isContinuingSurface(surface);
+        const startedInContact = exactContact || markedContact;
+        const crossedSurface = startGap <= this.EPSILON &&
+          endGap >= -safeSurfaceSkin - this.EPSILON &&
+          travel > this.EPSILON;
+        const continuedSurface = startedInContact && endWithinBounds &&
+          endGap >= -safeSurfaceSkin - this.EPSILON &&
+          endGap <= safeSurfaceSkin + this.EPSILON;
+        if (!crossedSurface && !continuedSurface) continue;
+
+        const time = startedInContact
+          ? 0
+          : MathUtils.clamp(-startGap / travel, 0, 1);
+        const hitX = MathUtils.lerp(startX, endX, time);
+        if (!startedInContact &&
+            (hitX < bounds.minX - safeEdgePadding || hitX > bounds.maxX + safeEdgePadding)) {
+          continue;
+        }
+
+        if (!firstHit || time < firstHit.time - this.EPSILON) {
+          firstHit = {
+            kind: 'surface',
+            time,
+            x: hitX,
+            y: this.getSurfaceYAt(surface, hitX) - safeRadius,
+            startedInContact,
+            surface
+          };
+        }
+      }
+
+      if (Number.isFinite(floorY)) {
+        const floorStartGap = startFeetY - floorY;
+        const floorEndGap = endFeetY - floorY;
+        let floorTime = null;
+
+        if (floorStartGap > this.EPSILON) {
+          floorTime = 0;
+        } else if (floorEndGap >= -this.EPSILON &&
+                   floorEndGap - floorStartGap > this.EPSILON) {
+          floorTime = MathUtils.clamp(-floorStartGap / (floorEndGap - floorStartGap), 0, 1);
+        }
+
+        if (floorTime !== null && (!firstHit || floorTime < firstHit.time - this.EPSILON)) {
+          firstHit = {
+            kind: 'floor',
+            time: floorTime,
+            x: MathUtils.lerp(startX, endX, floorTime),
+            y: floorY - safeRadius,
+            startedInContact: floorStartGap >= -this.EPSILON &&
+              floorStartGap <= this.EPSILON,
+            surface: null
+          };
+        }
+      }
+
+      return firstHit;
+    }
+  };
+
   // 统一挂载与占用系统 (Mount & Occupancy System)
   // 统一管理猫与环境实体（纸箱、扫地机、跳台、悬索桥、吊床）之间的附着与脱钩，
   // 消除私有状态分散导致的悬空引用与状态死锁
@@ -189,6 +328,7 @@
   window.CyberMeow = window.CyberMeow || {};
   window.CyberMeow.MathUtils = MathUtils;
   window.CyberMeow.VerletChain = VerletChain;
+  window.CyberMeow.LandingResolver = LandingResolver;
   window.CyberMeow.MountSystem = MountSystem;
   window.CyberMeow.physicsWorld = new PhysicsWorld();
 })(window);

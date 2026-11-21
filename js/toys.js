@@ -130,15 +130,25 @@
       ctx.fillStyle = this.color;
       ctx.fill();
 
-      // 缠绕线纹
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-      ctx.lineWidth = 2.2;
-      ctx.beginPath();
-      ctx.arc(-3, -3, this.radius * 0.7, 0.2, Math.PI * 1.3);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(3, 3, this.radius * 0.6, Math.PI * 0.7, Math.PI * 1.9);
-      ctx.stroke();
+      // Three winding directions follow the curve of the ball.
+      ctx.clip();
+      const r = this.radius;
+      ctx.strokeStyle = 'rgba(62,32,48,.28)';
+      ctx.lineWidth = r * .15;
+      for (let i = -3; i <= 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(-r, i*r*.32-r*.5);
+        ctx.quadraticCurveTo(0, i*r*.32+r*.5, r, i*r*.32+r*.35);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(255,241,212,.65)';
+      ctx.lineWidth = r * .10;
+      for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.moveTo(-r+i*r*.26, -r);
+        ctx.quadraticCurveTo(-r*.74+i*r*.22, -r*.18, r*.45+i*r*.19, r*.35);
+        ctx.stroke();
+      }
 
       ctx.restore();
     }
@@ -191,10 +201,30 @@
       ctx.save();
       ctx.translate(this.x, this.y);
       ctx.rotate(this.rotation);
-      ctx.font = '24px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('🐟', 0, 0);
+      ctx.fillStyle = '#c38746';
+      ctx.strokeStyle = '#714b37';
+      ctx.lineWidth = 1.15;
+      ctx.beginPath();
+      ctx.moveTo(-5, -1.5);
+      ctx.lineTo(-12, -5);
+      ctx.quadraticCurveTo(-10, 0, -12, 5);
+      ctx.lineTo(-5, 2);
+      ctx.bezierCurveTo(0, 8, 9, 5, 12, 0);
+      ctx.bezierCurveTo(8, -5, 0, -7, -5, -1.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = '#f0c58a';
+      ctx.beginPath();
+      ctx.moveTo(-4, 0);
+      ctx.quadraticCurveTo(1, -2, 4, -1);
+      ctx.moveTo(1, -.8);
+      ctx.lineTo(-1, 2.4);
+      ctx.stroke();
+      ctx.fillStyle = '#503f34';
+      ctx.beginPath();
+      ctx.arc(7, -1, 1, 0, Math.PI*2);
+      ctx.fill();
       ctx.restore();
     }
   }
@@ -303,13 +333,13 @@
       }
 
       // 纸箱底色
-      ctx.fillStyle = '#b7791f';
+      ctx.fillStyle = '#c59b6f';
       ctx.beginPath();
       ctx.roundRect(-this.w / 2, -this.h / 2, this.w, this.h, [4]);
       ctx.fill();
 
       // 边框折痕
-      ctx.strokeStyle = '#8c5011';
+      ctx.strokeStyle = '#835f45';
       ctx.lineWidth = 2;
       ctx.stroke();
 
@@ -323,18 +353,30 @@
         ctx.stroke();
       });
 
-      // 纸箱封口缝隙
-      ctx.strokeStyle = '#8c5011';
-      ctx.beginPath();
-      ctx.moveTo(-this.w / 2, 0);
-      ctx.lineTo(this.w / 2, 0);
-      ctx.stroke();
-
-      // 文字
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-      ctx.font = 'bold 9px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(this.isArmoredTank ? '🚀 TANK BOX' : '📦 AMAZON', 0, 12);
+      const left = -this.w / 2;
+      const top = -this.h / 2;
+      ctx.fillStyle = '#a67d54';
+      ctx.fillRect(left+2, top+2, this.w-4, 4);
+      ctx.fillStyle = '#ead2a2';
+      ctx.fillRect(left+this.w*.24, top+1, 7, this.h-2);
+      ctx.strokeStyle = '#c4a06e';
+      ctx.lineWidth = .8;
+      ctx.strokeRect(left+this.w*.24, top+1, 7, this.h-2);
+      ctx.translate(this.w*.19, this.h*.12);
+      ctx.rotate(-.09);
+      ctx.fillStyle = '#efe2bc';
+      ctx.fillRect(-10,-6,20,12);
+      ctx.fillStyle = '#526458';
+      if (this.isArmoredTank) {
+        ctx.beginPath();
+        ctx.moveTo(-6,3);
+        ctx.lineTo(6,-4);
+        ctx.lineTo(2,4);
+        ctx.lineTo(-1,1);
+        ctx.fill();
+      } else {
+        for (const x of [-5, -3, 0, 3, 5]) ctx.fillRect(x,-3,x===0?2:1,6);
+      }
 
       ctx.restore();
     }
@@ -398,8 +440,21 @@
         ctx.rotate((idx - 1) * 0.4);
         ctx.fillStyle = col;
         ctx.beginPath();
-        ctx.ellipse(12, 0, 16, 5, 0, 0, Math.PI * 2);
+        ctx.moveTo(0,0);
+        ctx.bezierCurveTo(6,-7,20,-7,29,-2);
+        ctx.bezierCurveTo(20,0,16,8,8,4);
+        ctx.closePath();
         ctx.fill();
+        ctx.strokeStyle = 'rgba(81,52,52,.56)';
+        ctx.lineWidth = .9;
+        ctx.beginPath();
+        ctx.moveTo(0,0);
+        ctx.quadraticCurveTo(14,1,27,-2);
+        for (let x = 7; x < 22; x += 4) {
+          ctx.moveTo(x,0);
+          ctx.lineTo(x+3,-3.5);
+        }
+        ctx.stroke();
         ctx.restore();
       });
 
@@ -502,24 +557,37 @@
       ctx.translate(this.x, this.y);
       ctx.rotate(this.wobbleAngle);
 
-      // 杯身
-      ctx.fillStyle = '#ffffff';
+      const w = this.w, h = this.h;
+      // Wheel-thrown stoneware with a cobalt glaze and an exposed clay foot.
+      ctx.strokeStyle = '#365e68';
+      ctx.lineWidth = 3.4;
       ctx.beginPath();
-      ctx.roundRect(-this.w / 2, -this.h / 2, this.w, this.h, [2, 2, 4, 4]);
-      ctx.fill();
-      ctx.strokeStyle = '#dfe4ea';
-      ctx.lineWidth = 1.5;
+      ctx.moveTo(w*.36,-h*.29);
+      ctx.bezierCurveTo(w*.98,-h*.42,w*.94,h*.23,w*.38,h*.22);
       ctx.stroke();
-
-      // 杯里的水
-      ctx.fillStyle = '#70a1ff';
-      ctx.fillRect(-this.w / 2 + 2, -this.h / 2 + 4, this.w - 4, this.h - 8);
-
-      // 把手
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 3;
+      ctx.fillStyle = '#668c91';
       ctx.beginPath();
-      ctx.arc(this.w / 2 + 3, 0, 6, -Math.PI * 0.4, Math.PI * 0.4);
+      ctx.moveTo(-w*.5,-h*.4);
+      ctx.quadraticCurveTo(-w*.49,h*.34,-w*.29,h*.45);
+      ctx.quadraticCurveTo(0,h*.55,w*.29,h*.45);
+      ctx.quadraticCurveTo(w*.50,h*.30,w*.5,-h*.4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#bc916d';
+      ctx.fillRect(-w*.28,h*.41,w*.56,h*.09);
+      ctx.fillStyle = '#e1c9a0';
+      ctx.beginPath();
+      ctx.ellipse(0,-h*.39,w*.5,h*.105,0,0,Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#36545c';
+      ctx.beginPath();
+      ctx.ellipse(0,-h*.39,w*.39,h*.058,0,0,Math.PI*2);
+      ctx.fill();
+      ctx.strokeStyle = '#b1c4af';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-w*.33,-h*.19);
+      ctx.quadraticCurveTo(-w*.31,h*.10,-w*.25,h*.22);
       ctx.stroke();
 
       ctx.restore();

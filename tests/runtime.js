@@ -66,7 +66,7 @@ function registerRuntimeTests(options) {
     assert.ok(app, 'DOMContentLoaded 后未挂载 app');
     assert.ok(app.canvas, 'app.canvas 缺失');
     assert.ok(app.ctx, 'app.ctx 缺失');
-    assert.strictEqual(app.cats.length, 3, '默认场景应有 3 只猫');
+    assert.strictEqual(app.cats.length, 4, '默认场景应有 4 只猫');
     assert.ok(app.furniture.length > 0, '默认场景缺少家具');
     assert.ok(app.toys.length > 0, '默认场景缺少玩具');
   });
@@ -233,6 +233,10 @@ function registerRuntimeTests(options) {
     const modal = mock.document.getElementById('snapshot-modal');
     assert.strictEqual(modal.classList.contains('open'), true, '快照弹窗未打开');
     assert.ok(mock.document.getElementById('snapshot-img').src.indexOf('data:image/png') === 0);
+    assert.strictEqual(mock.document.getElementById('game-shell').inert, true, '场景仍可以接收输入');
+    ui.dismissModal();
+    assert.strictEqual(modal.classList.contains('open'), false, '快照弹窗未关闭');
+    assert.strictEqual(mock.document.getElementById('game-shell').inert, false, '场景仍锁定');
   });
 
   // -------------------------------------------------------------------------
@@ -280,9 +284,7 @@ function registerRuntimeTests(options) {
       ui.challengeActive = false;
       app.currentTool = 'cat';
       app.furniture = [];
-      app.cats = Array.from({ length: 40 }, () => ({
-        x: -1000, y: -1000, radius: 2, isGrabbed: false
-      }));
+      app.cats = Array.from({ length: 40 }, () => new CyberMeow.Cat(-1000, -1000, { radius: 2 }));
       canvasEl.dispatch('pointerdown', {
         button: 0, clientX: 5, clientY: 5, pointerId: 0, preventDefault: noop
       });

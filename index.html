@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CyberMeow 🐾 赛博猫咪物理游乐场</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
   <meta name="description" content="CyberMeow: 零外部依赖的纯原生 HTML5 Canvas + Web Audio API 赛博猫咪物理游乐场！">
@@ -12,202 +12,219 @@
 </head>
 <body>
 
-  <!-- 顶部 HUD 状态卡片与系统工具栏 -->
-  <div id="top-bar">
-    <div class="hud-group">
-      <div class="glass-card title-badge">
-        <h1>🐾 CyberMeow</h1>
-        <div class="stats-bar">
-          <span>猫咪: <b id="stat-cats">0</b> 只</span>
-          <span>玩具/家具: <b id="stat-toys">0</b> 个</span>
-          <span>幸福度: <b id="stat-mood">100%</b></span>
+  <div class="game-shell" id="game-shell">
+    <header id="top-bar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><i></i></span>
+        <h1>CyberMeow <span>猫咪游乐场</span></h1>
+      </div>
+
+      <nav id="manor-nav-group" aria-label="房间导航">
+        <button class="nav-zone-btn active" data-zone="patio" aria-pressed="true">阳光露台</button>
+        <button class="nav-zone-btn" data-zone="living" aria-pressed="false">起居室</button>
+        <button class="nav-zone-btn" data-zone="playground" aria-pressed="false">攀爬乐园</button>
+      </nav>
+
+      <div class="header-actions">
+        <button class="action-btn" id="btn-photo" title="拍照 (P)" aria-label="拍照"><span class="camera-icon" aria-hidden="true"></span><span class="header-label">拍照</span></button>
+        <details class="settings-menu" id="settings-menu">
+          <summary class="action-btn" aria-label="打开设置" title="设置"><span class="menu-icon" aria-hidden="true">···</span><span class="header-label">设置</span></summary>
+          <div class="settings-panel">
+            <button class="pill-btn" id="btn-sound" aria-pressed="true">音效 · 开</button>
+            <button class="pill-btn" id="btn-bgm" aria-pressed="false">音乐 · 关</button>
+            <button class="pill-btn" id="btn-weather">天气 · 晴空</button>
+            <button class="pill-btn" id="btn-theme">时段 · 日间</button>
+            <button class="pill-btn" id="btn-cat-lod" title="切换画风 (T)">画风 · 团子</button>
+            <button class="pill-btn" id="btn-render-tuner" title="渲染设置 (E)">渲染设置</button>
+            <button class="pill-btn" id="btn-clear">清理道具</button>
+            <a class="pill-btn" href="https://github.com/vihithr/cyber-meow-sandbox" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
+          </div>
+        </details>
+      </div>
+    </header>
+
+    <main class="game-stage" aria-label="猫咪游乐场">
+      <div id="canvas-container">
+        <canvas id="playground" aria-label="猫咪与家具互动场景"></canvas>
+      </div>
+
+      <div class="stage-top">
+        <div class="room-card">
+          <span class="room-dot" aria-hidden="true"></span>
+          <span id="current-room">阳光露台</span>
+        </div>
+        <div class="scene-stats" aria-label="场景统计">
+          <span><b id="stat-cats">0</b> 只猫</span>
+          <span><b id="stat-toys">0</b> 件道具</span>
         </div>
       </div>
-    </div>
 
-    <!-- 超宽豪宅区域导航与全景缩放切换 -->
-    <div class="hud-group" id="manor-nav-group">
-      <div class="glass-card" style="padding: 5px 12px; gap: 8px;">
-        <span style="font-size: 0.78rem; color: #a4b0be; font-weight: bold;">🏰 豪宅分区:</span>
-        <button class="pill-btn nav-zone-btn active" data-zone="patio" title="平移镜头至阳光露台">☀️ 阳光露台</button>
-        <button class="pill-btn nav-zone-btn" data-zone="living" title="平移镜头至中央大客厅 (带自动投喂机)">🛋️ 豪华客厅</button>
-        <button class="pill-btn nav-zone-btn" data-zone="playground" title="平移镜头至猫咪游乐高塔与爬架">🎪 游乐高塔</button>
-        <button class="pill-btn" id="btn-zoom-toggle" title="切换全景俯瞰(0.65x)与常规视角(1.0x)" style="color: #feca57; font-weight: bold;">🔍 切换全景</button>
+      <div id="challenge-hud" role="status">
+        <span>剩余 <b id="challenge-time">45s</b></span>
+        <span>得分 <b id="challenge-score">0</b></span>
       </div>
-    </div>
 
-    <div class="hud-group">
-      <div class="glass-card" style="padding: 6px 12px; gap: 8px;">
-        <button class="pill-btn" id="btn-build-catalog" title="打开建造与摆放仓库 (快捷键: B)" style="background: linear-gradient(135deg, #10ac84 0%, #1dd1a1 100%); color: #fff; font-weight: bold;">🔨 建造仓库 (B)</button>
-        <button class="pill-btn" id="btn-cat-lod" title="切换猫咪渲染模式：Q萌团子 / 高精拟真 (快捷键: T)">🐱 风格: Q萌团子</button>
-        <button class="pill-btn" id="btn-render-tuner" title="打开底层绘制引擎与聚类折叠调控中心 (快捷键: E)" style="color: #48dbfb; font-weight: bold;">⚙️ 引擎调节 (E)</button>
-        <button class="pill-btn" id="btn-sound" title="音效开关">🔊 声音: 开</button>
-        <button class="pill-btn" id="btn-bgm" title="程序化生成极简 Lofi 氛围音乐">🎵 音乐: 关</button>
-        <button class="pill-btn" id="btn-weather" title="切换天气">☀️ 晴空</button>
-        <button class="pill-btn" id="btn-theme" title="切换场景主题风格">🌙 温馨夜</button>
-        <button class="pill-btn" id="btn-challenge" title="开启 45 秒红点挑战小游戏" style="color: #ff6b81;">🎯 挑战</button>
-        <button class="pill-btn" id="btn-photo" title="拍摄拍立得可爱纪念快照 (P)">📸 快照</button>
-        <button class="pill-btn" id="btn-clear" title="清空所有散落玩具">🧹 清理</button>
-        <a href="https://github.com/vihithr/cyber-meow-sandbox" target="_blank" class="pill-btn" style="text-decoration: none;" title="查看 GitHub 仓库源码">⭐ GitHub</a>
+      <div id="placement-hud" style="display: none;">
+        <span id="placement-hint"></span>
+        <button class="pill-btn" id="btn-cancel-placement">取消 <kbd>Esc</kbd></button>
       </div>
-    </div>
-  </div>
 
-  <!-- 红点追逐限时挑战 HUD -->
-  <div id="challenge-hud">
-    <span>⏱️ 剩余时间: <b id="challenge-time">45s</b></span>
-    <span>🏆 当前得分: <b id="challenge-score">0</b></span>
-  </div>
+      <div class="hint-toast" id="hint-text" role="status"></div>
 
-  <!-- 建造/放置模式实时悬浮指示栏 -->
-  <div id="placement-hud" style="display: none;">
-    <span id="placement-hint">🔨 放置模式：【豪华猫爬架】</span>
-    <span style="font-size: 0.8rem; opacity: 0.85;">左键点击放置 · ESC / 右键取消</span>
-    <button class="pill-btn" id="btn-cancel-placement" style="padding: 2px 10px; font-size: 0.75rem; background: rgba(255,255,255,0.2);">取消 (ESC)</button>
-  </div>
+      <aside class="map-card" aria-label="房间地图">
+        <div class="map-header">
+          <span>房间地图</span>
+          <button class="pill-btn" id="btn-zoom-toggle" aria-pressed="false">广角</button>
+        </div>
+        <div id="minimap-container" title="点击或拖动地图平移镜头">
+          <canvas id="minimap-canvas" width="320" height="48"></canvas>
+        </div>
+      </aside>
 
-  <!-- 浮动操作提示 Toast -->
-  <div class="hint-toast" id="hint-text">💡 提示：按 B 打开建造仓库摆放物品，按 T 切换 Q 萌/拟真渲染，右键拖拽平移豪宅！</div>
+      <div id="telemetry-hud" style="display: none;">
+        <span id="telem-hud-fps">60 FPS</span> · <span id="telem-hud-ms">1.2ms</span> · <span id="telem-hud-cats">0 只</span> · <span id="telem-hud-cluster">0 簇</span>
+      </div>
+    </main>
 
-  <!-- 底部多功能互动玩具与家具 Dock 抽屉 (默认折叠以保持纯净无遮挡) -->
-  <div id="dock-wrapper" class="collapsed">
-    <button id="dock-toggle-btn">▲ 展开侍奉坞</button>
-    <div id="dock-container">
-      <button class="dock-item active" data-tool="pet" title="快捷键: 1">👆 抚摸/抓起</button>
-      <button class="dock-item" data-tool="cat" title="快捷键: 2">🐱 召唤猫咪</button>
-      <button class="dock-item" data-tool="laser" title="快捷键: 3">🔴 激光红点</button>
-      <button class="dock-item" data-tool="feather" title="快捷键: 4">🪶 逗猫棒</button>
-      <button class="dock-item" data-tool="fish" title="快捷键: 5">🐟 投喂鱼干</button>
-      <button class="dock-item" data-tool="yarn" title="快捷键: 6">🧶 扔毛线球</button>
-      <button class="dock-item" data-tool="box" title="快捷键: 7">📦 放置纸箱</button>
-      <button class="dock-item" data-tool="cattree" title="快捷键: 8">🌳 豪华猫爬架</button>
-      <button class="dock-item" data-tool="bridge">🌉 空中猫道桥</button>
-      <button class="dock-item" data-tool="hammock">☁️ 高空猫吊床</button>
-      <button class="dock-item" data-tool="roomba" title="快捷键: 9">🤖 扫地机</button>
-      <button class="dock-item" data-tool="scratcher">🪵 瓦楞抓板</button>
-      <button class="dock-item" data-tool="catnip" title="快捷键: 0">🌿 猫薄荷喷雾</button>
-      <button class="dock-item" data-tool="recycle" title="回收点击的玩具或家具">🧹 单体回收</button>
-      <button class="dock-item" id="btn-antigravity" title="快捷键: 空格键">🛸 反重力模式</button>
-    </div>
-  </div>
-
-  <!-- 豪宅全景小地图雷达导航 (Manor Radar Minimap) -->
-  <div id="minimap-container" title="点击或拖拽小地图可快速平移镜头，实时显示全屋猫咪分布">
-    <canvas id="minimap-canvas" width="320" height="44"></canvas>
-    <div id="minimap-viewport"></div>
-  </div>
-
-  <!-- 主物理游戏画布 -->
-  <div id="canvas-container">
-    <canvas id="playground"></canvas>
+    <footer id="dock-wrapper" class="collapsed">
+      <div class="dock-leading">
+        <button class="build-btn" id="btn-build-catalog" title="建造仓库 (B)"><span aria-hidden="true">＋</span>建造 <kbd>B</kbd></button>
+      </div>
+      <div id="dock-container" role="group" aria-label="互动工具">
+        <button class="dock-item active" data-tool="pet" title="抚摸 (1)" aria-pressed="true"><span aria-hidden="true">✋</span>抚摸</button>
+        <button class="dock-item" data-tool="cat" title="领养 (2)" aria-pressed="false"><span aria-hidden="true">🐱</span>领养</button>
+        <button class="dock-item" data-tool="laser" title="激光 (3)" aria-pressed="false"><span aria-hidden="true">🔴</span>激光</button>
+        <button class="dock-item" data-tool="feather" title="逗猫棒 (4)" aria-pressed="false"><span aria-hidden="true">🪶</span>逗猫棒</button>
+        <button class="dock-item" data-tool="fish" title="鱼干 (5)" aria-pressed="false"><span aria-hidden="true">🐟</span>鱼干</button>
+        <button class="dock-item" data-tool="yarn" title="毛线 (6)" aria-pressed="false"><span aria-hidden="true">🧶</span>毛线</button>
+        <div id="dock-extra" class="dock-extra">
+          <button class="dock-item" data-tool="box" title="纸箱 (7)" aria-pressed="false">📦 纸箱</button>
+          <button class="dock-item" data-tool="cattree" title="猫爬架 (8)" aria-pressed="false">🌳 猫爬架</button>
+          <button class="dock-item" data-tool="bridge" aria-pressed="false">🌉 天桥</button>
+          <button class="dock-item" data-tool="hammock" aria-pressed="false">☁️ 吊床</button>
+          <button class="dock-item" data-tool="roomba" title="扫地机 (9)" aria-pressed="false">🤖 扫地机</button>
+          <button class="dock-item" data-tool="scratcher" aria-pressed="false">🪵 猫抓板</button>
+          <button class="dock-item" data-tool="catnip" title="猫薄荷 (0)" aria-pressed="false">🌿 猫薄荷</button>
+          <button class="dock-item" data-tool="recycle" aria-pressed="false">↶ 回收</button>
+          <button class="dock-item" id="btn-antigravity" title="反重力 (空格)" aria-pressed="false">反重力</button>
+          <button class="dock-item" id="btn-challenge" aria-pressed="false">红点挑战</button>
+        </div>
+      </div>
+      <div class="dock-trailing">
+        <button class="action-btn" id="dock-toggle-btn" aria-controls="dock-extra" aria-expanded="false"><span aria-hidden="true">⊞</span> 更多<span class="tool-label">工具</span></button>
+      </div>
+    </footer>
   </div>
 
   <!-- 猫咪身份证模态卡片 (Cat Passport Modal) -->
-  <div class="modal-overlay" id="passport-modal">
+  <div class="modal-overlay" id="passport-modal" role="dialog" aria-modal="true" aria-labelledby="passport-heading">
     <div class="passport-card">
       <div class="passport-header">
-        <h3>🐾 猫咪身份证 (Passport)</h3>
-        <button class="btn-close" id="btn-close-passport">&times;</button>
+        <h2 id="passport-heading">猫咪档案</h2>
+        <button class="btn-close" aria-label="关闭" id="btn-close-passport">&times;</button>
       </div>
       <div class="passport-body">
         <div class="avatar-row">
           <canvas id="passport-avatar-canvas" width="76" height="76"></canvas>
           <div class="name-edit-box">
-            <input type="text" id="cat-name-input" class="name-input" maxlength="10" placeholder="点击修改名字">
+            <input type="text" aria-label="猫咪名字" id="cat-name-input" class="name-input" maxlength="10" placeholder="点击修改名字">
             <span class="badge-tag" id="cat-breed-tag">品种</span>
           </div>
         </div>
 
-        <div style="background: rgba(255, 255, 255, 0.04); padding: 10px 14px; border-radius: 10px;">
-          <div style="font-size: 0.85rem; font-weight: 700; color: #feca57;" id="cat-personality-title">性格</div>
-          <div style="font-size: 0.8rem; color: #a4b0be; margin-top: 4px;" id="cat-personality-desc">性格说明</div>
+        <div class="personality-card">
+          <div id="cat-personality-title">性格</div>
+          <div id="cat-personality-desc">性格说明</div>
         </div>
 
         <div class="stat-metric">
-          <div class="stat-metric-label"><span>饱腹度 (吃小鱼干增加)</span></div>
+          <div class="stat-metric-label"><span>饱腹度</span></div>
           <div class="progress-track"><div class="progress-fill fill-hunger" id="bar-hunger"></div></div>
         </div>
 
         <div class="stat-metric">
-          <div class="stat-metric-label"><span>亲密度 (抚摸与陪伴增加)</span></div>
+          <div class="stat-metric-label"><span>亲密度</span></div>
           <div class="progress-track"><div class="progress-fill fill-affection" id="bar-affection"></div></div>
         </div>
 
         <div class="stat-metric">
-          <div class="stat-metric-label"><span>精力活力 (阳光与打盹恢复)</span></div>
+          <div class="stat-metric-label"><span>精力</span></div>
           <div class="progress-track"><div class="progress-fill fill-energy" id="bar-energy"></div></div>
         </div>
 
-        <div style="margin-top: 6px;">
-          <div style="font-size: 0.8rem; color: #dfe4ea; margin-bottom: 6px;">🎩 专属服饰搭配:</div>
+        <div>
+          <div>配饰</div>
           <div class="hat-picker" id="hat-picker-opts"></div>
         </div>
 
-        <button class="pill-btn active" id="btn-passport-hold" style="width: 100%; justify-content: center; margin-top: 14px; font-size: 0.95rem;">🐾 抱入怀中 (特写侍奉)</button>
+        <button class="pill-btn active" id="btn-passport-hold">抱入怀中</button>
       </div>
     </div>
   </div>
 
   <!-- 怀抱特写侍奉台 (Close-up Studio Modal) -->
-  <div class="modal-overlay" id="studio-modal">
+  <div class="modal-overlay" id="studio-modal" role="dialog" aria-modal="true" aria-labelledby="studio-cat-name">
     <div class="studio-card">
       <div class="studio-header">
-        <h3 id="studio-cat-name">🐾 亲密侍奉时光</h3>
-        <button class="btn-close" id="btn-close-studio">&times;</button>
+        <h2 id="studio-cat-name">照顾猫咪</h2>
+        <div class="modal-header-actions">
+          <button class="pill-btn" id="btn-studio-passport">档案</button>
+          <button class="btn-close" aria-label="关闭" id="btn-close-studio">&times;</button>
+        </div>
       </div>
 
       <!-- 猫咪心理耐心与过载警戒条 -->
-      <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 6px; margin-bottom: 4px; font-size: 0.75rem; color: #ced6e0;">
-        <span>猫咪耐心值 (连摸肚皮会过载):</span>
-        <span id="studio-mood-tag" style="color: #2ed573; font-weight: bold;">🥰 极度舒适</span>
+      <div>
+        <span>耐心</span>
+        <span id="studio-mood-tag">🥰 极度舒适</span>
       </div>
-      <div class="metric-track" style="margin-bottom: 8px; height: 6px;">
-        <div class="metric-fill" id="studio-patience-bar" style="width: 100%; background: #2ed573;"></div>
+      <div class="metric-track">
+        <div class="metric-fill" id="studio-patience-bar"></div>
       </div>
 
       <canvas id="studio-canvas" width="380" height="240"></canvas>
       <div class="studio-actions-bar">
-        <button class="studio-tool-btn active" data-tool="brush">🪮 舒爽梳毛</button>
-        <button class="studio-tool-btn" data-tool="chin">🖐️ 挠挠下巴</button>
-        <button class="studio-tool-btn" data-tool="churu">🐟 撕开猫条</button>
+        <button class="studio-tool-btn active" data-tool="brush">梳毛</button>
+        <button class="studio-tool-btn" data-tool="chin">挠下巴</button>
+        <button class="studio-tool-btn" data-tool="churu">喂猫条</button>
       </div>
 
       <!-- 浮毛搓成毛球彩蛋横幅 -->
-      <div id="studio-fur-banner" style="display: none; background: rgba(254, 202, 87, 0.2); border: 1px dashed #feca57; padding: 6px 10px; border-radius: 8px; margin-top: 8px; justify-content: space-between; align-items: center;">
-        <span style="font-size: 0.8rem; color: #feca57;">✨ 收集的浮毛搓成了专属毛球！</span>
-        <button class="pill-btn active" id="btn-toss-fur-ball" style="padding: 3px 8px; font-size: 0.75rem;">扔回房间 🧶</button>
+      <div id="studio-fur-banner" style="display: none;">
+        <span>✨ 收集的浮毛搓成了专属毛球！</span>
+        <button class="pill-btn active" id="btn-toss-fur-ball">扔回房间 🧶</button>
       </div>
 
-      <div style="font-size: 0.75rem; color: #a4b0be; margin-top: 8px;">
-        💡 提示：头颈下巴是安全区；若一直摸肚皮会触发「猫咪过载抱咬反击」！
+      <div>
+        试试从后颈梳到背部。碰肚皮会消耗耐心。
       </div>
     </div>
   </div>
 
   <!-- 拍立得快照下载模态 (Photo Snapshot Modal) -->
-  <div class="modal-overlay" id="snapshot-modal">
+  <div class="modal-overlay" id="snapshot-modal" role="dialog" aria-modal="true" aria-labelledby="snapshot-heading">
     <div class="snapshot-polaroid">
       <img id="snapshot-img" alt="CyberMeow 快照">
-      <div class="polaroid-caption">🐾 Captured in CyberMeow Playground 💖</div>
+      <h2 class="polaroid-caption" id="snapshot-heading">猫屋快照</h2>
       <div class="snapshot-actions">
-        <button class="pill-btn active" id="btn-download-snap">💾 下载相片 (PNG)</button>
+        <button class="pill-btn active" id="btn-download-snap">下载 PNG</button>
         <button class="pill-btn" id="btn-close-snapshot">关闭</button>
       </div>
     </div>
   </div>
 
   <!-- 建造仓库与摆放分类菜单模态框 (Build Catalog Modal) -->
-  <div class="modal-overlay" id="build-catalog-modal">
+  <div class="modal-overlay" id="build-catalog-modal" role="dialog" aria-modal="true" aria-labelledby="catalog-heading">
     <div class="catalog-card">
       <div class="catalog-header">
-        <h3>🔨 豪宅筑巢指南 · 建造与摆放仓库</h3>
-        <button class="btn-close" id="btn-close-catalog">&times;</button>
+        <h2 id="catalog-heading">建造仓库</h2>
+        <button class="btn-close" aria-label="关闭" id="btn-close-catalog">&times;</button>
       </div>
       <div class="catalog-tabs">
-        <button class="catalog-tab-btn active" data-tab="cats">🐱 猫咪与补给</button>
-        <button class="catalog-tab-btn" data-tab="toys">🧶 趣味玩具</button>
-        <button class="catalog-tab-btn" data-tab="furniture">📦 舒适家具</button>
-        <button class="catalog-tab-btn" data-tab="structures">🪜 攀爬猫道</button>
+        <button class="catalog-tab-btn active" data-tab="cats">猫咪与补给</button>
+        <button class="catalog-tab-btn" data-tab="toys">玩具</button>
+        <button class="catalog-tab-btn" data-tab="furniture">家具</button>
+        <button class="catalog-tab-btn" data-tab="structures">攀爬设施</button>
       </div>
       <div class="catalog-body">
         <div class="catalog-grid" id="catalog-grid-items">
@@ -215,86 +232,81 @@
         </div>
       </div>
       <div class="catalog-footer">
-        <span>💡 选定物品后直接进入<b>放置模式</b>，移动光标自由预览吸附，左键放置！(快捷键 B 随时开关)</span>
+        <span>选择物品后在房间内点击放置，按 <kbd>Esc</kbd> 取消。</span>
       </div>
     </div>
   </div>
 
   <!-- 底层绘制引擎与标签聚类调控中心模态框 (Render Engine Tuner Modal) -->
-  <div class="modal-overlay" id="render-tuner-modal">
+  <div class="modal-overlay" id="render-tuner-modal" role="dialog" aria-modal="true" aria-labelledby="tuner-heading">
     <div class="tuner-card">
       <div class="tuner-header">
-        <h3>⚙️ 底层绘制引擎与标签折叠调控中心</h3>
-        <button class="btn-close" id="btn-close-tuner">&times;</button>
+        <h2 id="tuner-heading">渲染设置</h2>
+        <button class="btn-close" aria-label="关闭" id="btn-close-tuner">&times;</button>
       </div>
       <div class="tuner-body">
         <!-- 场景调优预设 -->
         <div class="tuner-section">
-          <div class="tuner-section-title">⚡ 一键场景调优预设 (Presets)</div>
+          <div class="tuner-section-title">画质预设</div>
           <div class="preset-grid">
             <button class="preset-btn" data-preset="saver">
-              <b>🔋 极致节能省电</b>
-              <span>离屏Sprite预烘焙 · 极简微标 · 30粒子</span>
+              <b>流畅</b>
+              <span>精简标签与粒子</span>
             </button>
             <button class="preset-btn active" data-preset="balanced">
-              <b>🐾 萌系平衡推荐</b>
-              <span>Q萌水汪双眼 · 智能聚类防撞 · 100粒子</span>
+              <b>均衡</b>
+              <span>团子角色与自动标签</span>
             </button>
             <button class="preset-btn" data-preset="ultra">
-              <b>🧬 次世代高精全开</b>
-              <span>5节脊椎骨骼宝石眼 · 全量展开 · 240粒子</span>
+              <b>高精度</b>
+              <span>骨骼模型与完整标签</span>
             </button>
           </div>
         </div>
 
         <!-- 渲染管线与优化配置 -->
         <div class="tuner-section">
-          <div class="tuner-section-title">🎨 猫咪渲染管线与离屏加速</div>
+          <div class="tuner-section-title">角色渲染</div>
           <div class="control-row">
-            <span class="control-label">管线模式:</span>
+            <span class="control-label">模型</span>
             <div class="toggle-group" id="tuner-pipeline-group">
-              <button class="tuner-opt-btn active" data-val="chibi">Q 萌团子 (Chibi)</button>
-              <button class="tuner-opt-btn" data-val="chibi_cached">极速离屏烘焙 (Cached)</button>
-              <button class="tuner-opt-btn" data-val="procedural">次世代骨骼拟真</button>
+              <button class="tuner-opt-btn active" data-val="chibi">团子</button>
+              <button class="tuner-opt-btn" data-val="chibi_cached">团子 · 预缓存</button>
+              <button class="tuner-opt-btn" data-val="procedural">骨骼</button>
             </div>
           </div>
           <div class="control-row">
-            <span class="control-label">离屏 Sprite 缓存烘焙:</span>
+            <label class="control-label" for="chk-sprite-cache">缓存静态造型</label>
             <label class="switch-toggle">
               <input type="checkbox" id="chk-sprite-cache" checked>
               <span class="switch-slider"></span>
             </label>
-            <span class="control-tip">（预生成静态躯干，节省 80% 路径与颜色切换）</span>
           </div>
           <div class="control-row">
-            <span class="control-label">灵动双眼视线追踪:</span>
+            <label class="control-label" for="chk-eye-tracking">视线追踪</label>
             <label class="switch-toggle">
               <input type="checkbox" id="chk-eye-tracking" checked>
               <span class="switch-slider"></span>
             </label>
-            <span class="control-tip">（双眼异瞳立体透视 + 随动注视）</span>
           </div>
         </div>
 
         <!-- 标签折叠与空间聚类 -->
         <div class="tuner-section">
-          <div class="tuner-section-title">🏷️ 空间聚类与标签分级折叠 (Anti-Crowd Cluster)</div>
+          <div class="tuner-section-title">猫咪标签</div>
           <div class="control-row">
-            <span class="control-label">折叠策略:</span>
+            <span class="control-label">显示方式</span>
             <div class="toggle-group" id="tuner-cluster-group">
-              <button class="tuner-opt-btn active" data-val="smart">智能聚类防重叠 (Smart)</button>
-              <button class="tuner-opt-btn" data-val="minimal">极简微标模式 (Minimal)</button>
-              <button class="tuner-opt-btn" data-val="full">经典全量展开 (Full)</button>
+              <button class="tuner-opt-btn active" data-val="smart">自动合并</button>
+              <button class="tuner-opt-btn" data-val="minimal">极简</button>
+              <button class="tuner-opt-btn" data-val="full">显示全部</button>
             </div>
-          </div>
-          <div class="control-tip" style="margin-top: 8px;">
-            💡 智能聚类模式会在多猫扎堆时自动聚合为折叠胶囊，相邻单猫名牌自动错位避让，彻底消除文字重叠与光污染！
           </div>
         </div>
 
         <!-- 实时遥测指标 -->
         <div class="tuner-section">
-          <div class="tuner-section-title">📊 引擎实时遥测 (Live Telemetry)</div>
+          <div class="tuner-section-title">性能监视</div>
           <div class="telemetry-grid">
             <div class="telemetry-item"><span>实时帧率</span><b id="tuner-fps">60 FPS</b></div>
             <div class="telemetry-item"><span>单帧耗时</span><b id="tuner-ms">1.2 ms</b></div>
@@ -303,8 +315,8 @@
             <div class="telemetry-item"><span>离屏缓存命中</span><b id="tuner-cache-hit">100%</b></div>
             <div class="telemetry-item"><span>视口剔除实体</span><b id="tuner-culled">0</b></div>
           </div>
-          <div class="control-row" style="margin-top: 10px;">
-            <span class="control-label">在主屏幕常驻遥测浮窗:</span>
+          <div class="control-row">
+            <label class="control-label" for="chk-show-telemetry">在场景内显示性能</label>
             <label class="switch-toggle">
               <input type="checkbox" id="chk-show-telemetry">
               <span class="switch-slider"></span>
@@ -313,11 +325,6 @@
         </div>
       </div>
     </div>
-  </div>
-
-  <!-- 主界面微型遥测 HUD -->
-  <div id="telemetry-hud" style="display: none;">
-    <span id="telem-hud-fps">60 FPS</span> · <span id="telem-hud-ms">1.2ms</span> · <span id="telem-hud-cats">🐾 0只</span> · <span id="telem-hud-cluster">📦 0簇</span>
   </div>
 
   <!-- 纯原生 JS 模块 (零外部依赖，支持直接 double-click 本地打开) -->

@@ -6,7 +6,7 @@
   'use strict';
 
   const { MathUtils, physicsWorld } = window.CyberMeow;
-  const FEATHER_COLORS = ['#fd79a8', '#a29bfe', '#ffeaa7'];
+  const COMET_RIBBONS = ['#bb7155', '#e6bc72', '#799b91'];
 
   // 帧率无关步长：从 app 已传入的 sceneContext.dt 推导，60fps 时为 1。
   // 上层 dt 已钳制在 1/1000~0.05，这里再限 3 防极端跳变；旧调用不传 scene 时退化为 1，行为不变。
@@ -14,6 +14,45 @@
     const dt = scene && typeof scene.dt === 'number' && scene.dt > 0 ? scene.dt : 1 / 60;
     return Math.min(dt * 60, 3);
   };
+
+  // Local coordinates keep the top edge aligned with the landing surface.
+  function drawUpholsteredShelf(ctx, x, y, w, h) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = '#80543c';
+    ctx.beginPath();
+    ctx.roundRect(-w / 2, 0, w, h, 4);
+    ctx.fill();
+    ctx.fillStyle = '#b77d51';
+    ctx.fillRect(2-w/2, 2, w-4, h*.52);
+    ctx.strokeStyle = '#dfac76';
+    ctx.lineWidth = .8;
+    ctx.beginPath();
+    ctx.moveTo(5-w/2, h*.56);
+    ctx.bezierCurveTo(-w*.22,h*.24,w*.15,h*.79,w/2-5,h*.43);
+    ctx.stroke();
+
+    ctx.fillStyle = '#42635a';
+    ctx.beginPath();
+    ctx.roundRect(3-w/2, -4, w-6, 8, 4);
+    ctx.fill();
+    ctx.fillStyle = '#91a99a';
+    ctx.fillRect(8-w/2, -3, w-16, 1.4);
+    ctx.strokeStyle = '#d3c6a3';
+    ctx.setLineDash([2, 4]);
+    ctx.beginPath();
+    ctx.moveTo(8-w/2, 1.4);
+    ctx.lineTo(w/2-8, 1.4);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    for (const end of [-1, 1]) {
+      ctx.fillStyle = '#dbb478';
+      ctx.beginPath();
+      ctx.arc(end*(w/2-7), h*.65, 1.65, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
 
   // 1. 墙面高空跳台 (WallPerch) - 猫咪最爱的高处领地！
   class WallPerch {
@@ -65,44 +104,7 @@
       ctx.closePath();
       ctx.fill();
 
-      // 跳台实木板：竖向木纹渐变 + 顶部高光，按尺寸缓存
-      if (!this._plankGrad || this._plankKey !== `${this.w}_${this.h}`) {
-        const g = ctx.createLinearGradient(0, -4, 0, this.h + 2);
-        g.addColorStop(0, '#f0d3a8');
-        g.addColorStop(0.35, '#deb887');
-        g.addColorStop(1, '#b9844f');
-        this._plankGrad = g;
-        this._plankKey = `${this.w}_${this.h}`;
-      }
-      ctx.fillStyle = this._plankGrad;
-      ctx.beginPath();
-      ctx.roundRect(-this.w / 2, 0, this.w, this.h, [5]);
-      ctx.fill();
-      ctx.strokeStyle = '#a0522d';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      // 木纹细线 + 两端铆钉
-      ctx.strokeStyle = 'rgba(150, 100, 55, 0.35)';
-      ctx.lineWidth = 0.8;
-      for (let gx = -this.w / 2 + 12; gx < this.w / 2 - 6; gx += 14) {
-        ctx.beginPath();
-        ctx.moveTo(gx, 2);
-        ctx.lineTo(gx + 3, this.h - 2);
-        ctx.stroke();
-      }
-      ctx.fillStyle = '#8b6b45';
-      ctx.beginPath();
-      ctx.arc(-this.w / 2 + 7, this.h / 2, 1.8, 0, Math.PI * 2);
-      ctx.arc(this.w / 2 - 7, this.h / 2, 1.8, 0, Math.PI * 2);
-      ctx.fill();
-
-      // 柔软绒布软垫
-      ctx.fillStyle = '#ffb8b8';
-      ctx.beginPath();
-      ctx.roundRect(-this.w / 2 + 8, -4, this.w - 16, 5, [3]);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,0.4)';
-      ctx.fillRect(-this.w / 2 + 12, -4, this.w - 24, 1.5);
+      drawUpholsteredShelf(ctx, 0, 0, this.w, this.h);
 
       ctx.restore();
     }
@@ -150,21 +152,19 @@
       });
     }
 
+    getPerchSurfaces() {
+      if (!this._perchSurfaces) {
+        this._perchSurfaces = [{ id: this, x: this.x, y: 0, w: this.w + 16, type: 'perch' }];
+      }
+      const [surface] = this._perchSurfaces;
+      surface.x = this.x;
+      surface.y = this.y + this.h / 2 - 4;
+      return this._perchSurfaces;
+    }
+
     draw(ctx) {
       ctx.save();
       ctx.translate(this.x, this.y);
-
-      // 窗外天空背景
-      ctx.fillStyle = '#81ecec';
-      ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
-
-      // 窗外云朵
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-      ctx.beginPath();
-      ctx.arc(-20, -20, 22, 0, Math.PI * 2);
-      ctx.arc(10, -26, 18, 0, Math.PI * 2);
-      ctx.arc(35, -20, 16, 0, Math.PI * 2);
-      ctx.fill();
 
       // 窗外飞过的小鸟 (吸引猫咪注视)
       this.birds.forEach(b => {
@@ -187,26 +187,25 @@
         }
       });
 
-      // 实木白色窗框
-      ctx.strokeStyle = '#dfe4ea';
-      ctx.lineWidth = 8;
-      ctx.strokeRect(-this.w / 2, -this.h / 2, this.w, this.h);
-
-      // 十字窗格
-      ctx.lineWidth = 4;
+      const ledgeY = this.h / 2 - 4;
+      const edge = this.w / 2 + 8;
+      ctx.fillStyle = '#866346';
+      for (const anchor of [-this.w * .29, this.w * .29]) {
+        ctx.beginPath();
+        ctx.moveTo(anchor - 2, ledgeY + 6);
+        ctx.lineTo(anchor + 22, ledgeY + 6);
+        ctx.lineTo(anchor, ledgeY + 24);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.fillStyle = '#b48c63';
       ctx.beginPath();
-      ctx.moveTo(0, -this.h / 2);
-      ctx.lineTo(0, this.h / 2);
-      ctx.moveTo(-this.w / 2, 0);
-      ctx.lineTo(this.w / 2, 0);
-      ctx.stroke();
-
-      // 突出窗台 (猫咪可趴卧)
-      ctx.fillStyle = '#f1f2f6';
-      ctx.fillRect(-this.w / 2 - 12, this.h / 2 - 4, this.w + 24, 12);
-      ctx.strokeStyle = '#ced6e0';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(-this.w / 2 - 12, this.h / 2 - 4, this.w + 24, 12);
+      ctx.roundRect(-edge, ledgeY, edge * 2, 10, 3);
+      ctx.fill();
+      ctx.fillStyle = '#e8d0a7';
+      ctx.beginPath();
+      ctx.roundRect(-edge, ledgeY, edge * 2, 4, 2);
+      ctx.fill();
 
       ctx.restore();
     }
@@ -348,35 +347,38 @@
       // 被踢后的机身旋转：阴影保持贴地，仅底盘与上层结构随 spinAngle 转动
       if (this.spinAngle) ctx.rotate(this.spinAngle);
 
-      // 底盘主体
+      // Enamel service trolley: bumper skirt, inset deck and a brass inspection hatch.
+      const r = this.radius, h = this.height;
+      ctx.fillStyle = '#344944';
       ctx.beginPath();
-      ctx.ellipse(0, 0, this.radius, this.height, 0, 0, Math.PI * 2);
-      ctx.fillStyle = '#2f3542';
+      ctx.roundRect(-r, -h*.5, r*2, h*1.4, h*.66);
       ctx.fill();
-      ctx.strokeStyle = '#57606f';
-      ctx.lineWidth = 2;
+      ctx.fillStyle = '#91aaa0';
+      ctx.beginPath();
+      ctx.ellipse(0, -h*.27, r-.6, h*.76, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.strokeStyle = '#e0c290';
+      ctx.lineWidth = 1.4;
       ctx.stroke();
-
-      // 顶盖装饰圈
+      ctx.fillStyle = '#536e65';
       ctx.beginPath();
-      ctx.ellipse(0, -2, this.radius * 0.72, this.height * 0.72, 0, 0, Math.PI * 2);
-      ctx.fillStyle = '#1e272e';
+      ctx.ellipse(-r*.25, -h*.36, r*.34, h*.49, -.08, 0, Math.PI*2);
       ctx.fill();
-
-      // 激光雷达小凸起
+      ctx.fillStyle = '#e8c78d';
       ctx.beginPath();
-      ctx.arc(0, -6, 7, 0, Math.PI * 2);
-      ctx.fillStyle = '#485460';
+      ctx.ellipse(-r*.25, -h*.46, r*.23, h*.30, -.08, 0, Math.PI*2);
       ctx.fill();
-
-      // 呼吸 LED
-      const glow = (Math.sin(this.ledPhase) + 1) * 0.5;
-      ctx.beginPath();
-      ctx.arc(0, -6, 3, 0, Math.PI * 2);
-      ctx.fillStyle = this.rider ? `rgba(46, 213, 115, ${0.4 + glow * 0.6})` : `rgba(30, 144, 255, ${0.4 + glow * 0.6})`;
-      ctx.shadowColor = this.rider ? '#2ed573' : '#1e90ff';
-      ctx.shadowBlur = 10;
-      ctx.fill();
+      ctx.strokeStyle = '#456057';
+      ctx.lineWidth = 1.5;
+      for (let i=0; i<3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(r*.25+i*3, -h*.51);
+        ctx.lineTo(r*.18+i*3, -h*.08);
+        ctx.stroke();
+      }
+      ctx.fillStyle = this.rider ? '#a1edbc' : '#f1c77d';
+      ctx.globalAlpha = .75 + Math.sin(this.ledPhase)*.2;
+      ctx.fillRect(r*.45, h*.36, r*.25, 2);
 
       ctx.restore();
     }
@@ -500,7 +502,7 @@
       for (let py = postTop; py < -18; py += 8) {
         ctx.beginPath();
         ctx.moveTo(-12, py);
-        ctx.lineTo(12, py + 2);
+        ctx.bezierCurveTo(-5, py + 3, 5, py + 4, 12, py + 2);
         ctx.stroke();
       }
       // 顶/底金属箍，增加材质层次
@@ -512,25 +514,15 @@
       ctx.fillRect(-13, -22, 26, 1.5);
 
       // 各层平台
-      this.tiers.forEach((tier, idx) => {
-        ctx.fillStyle = '#deb887';
-        ctx.beginPath();
-        ctx.roundRect(tier.xOffset - tier.w / 2, tier.yOffset, tier.w, tier.h, [6]);
-        ctx.fill();
-        ctx.strokeStyle = '#a0522d';
-        ctx.stroke();
-
-        if (idx === 1) {
-          ctx.fillStyle = '#ff7675';
-          ctx.beginPath();
-          ctx.roundRect(tier.xOffset - tier.w / 2 + 6, tier.yOffset - 6, tier.w - 12, 6, [3]);
-          ctx.fill();
-        }
-      });
+      for (const tier of this.tiers) {
+        drawUpholsteredShelf(ctx, tier.xOffset, tier.yOffset, tier.w, tier.h);
+      }
 
       // 吊球
       const anchorX = 40;
-      const anchorY = -200;
+      const anchorY = this.tiers[1].yOffset + 80;
+      ctx.fillStyle = '#876a48';
+      ctx.fillRect(anchorX - 2, this.tiers[1].yOffset + this.tiers[1].h, 4, 80 - this.tiers[1].h);
       ctx.strokeStyle = '#f5cd79';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -737,73 +729,68 @@
       ctx.fillStyle = 'rgba(0,0,0,0.2)';
       ctx.fill();
 
-      // 底座食盆
-      ctx.fillStyle = '#dfe4ea';
+      // Gravity-fed seed dispenser: a glass hopper seats into a cast enamel stand.
+      const top = -this.h;
+      ctx.fillStyle = '#466459';
       ctx.beginPath();
-      ctx.roundRect(-24, -12, 48, 15, [5]);
+      ctx.roundRect(-20, top+23, 32, -top-23, [4,4,2,2]);
       ctx.fill();
-      ctx.strokeStyle = '#a4b0be';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      // 食盆内部
-      ctx.fillStyle = '#747d8c';
+      ctx.fillStyle = '#809b87';
+      ctx.fillRect(-18,top+26,4,-top-34);
+      ctx.fillStyle = '#dbe6d0';
       ctx.beginPath();
-      ctx.ellipse(12, -4, 11, 4.5, 0, 0, Math.PI * 2);
+      ctx.moveTo(-19,top+4);
+      ctx.quadraticCurveTo(-20,top+23,-12,top+29);
+      ctx.lineTo(5,top+29);
+      ctx.quadraticCurveTo(13,top+23,12,top+4);
+      ctx.closePath();
       ctx.fill();
-
-      // 碗里的猫粮小鱼干
-      if (this.foodBowlLevel > 0) {
-        ctx.fillStyle = '#e67e22';
-        for (let i = 0; i < Math.min(4, this.foodBowlLevel); i++) {
-          ctx.beginPath();
-          ctx.arc(8 + i * 2.5, -5, 2, 0, Math.PI * 2);
-          ctx.fill();
-        }
+      ctx.save();
+      ctx.clip();
+      ctx.fillStyle = '#ba8753';
+      ctx.beginPath();
+      ctx.moveTo(-22,top+16);
+      ctx.quadraticCurveTo(-9,top+8,14,top+19);
+      ctx.lineTo(14,top+32);
+      ctx.lineTo(-22,top+32);
+      ctx.fill();
+      ctx.fillStyle = '#e1b674';
+      for (let i=0; i<15; i++) {
+        ctx.fillRect(-16+(i*11)%29,top+18+(i*7)%11,2.5,1.6);
       }
-
-      // 白色主机身
-      ctx.fillStyle = '#f1f2f6';
+      ctx.fillStyle = 'rgba(255,255,240,.64)';
+      ctx.fillRect(-16,top+5,3,19);
+      ctx.restore();
+      ctx.fillStyle = '#795b3e';
       ctx.beginPath();
-      ctx.roundRect(-20, -this.h, 40, this.h - 10, [7]);
+      ctx.roundRect(-21,top,35,6,3);
       ctx.fill();
-      ctx.strokeStyle = '#ced6e0';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      // 半透明可视储粮仓
-      ctx.fillStyle = 'rgba(116, 185, 255, 0.35)';
+      ctx.fillStyle = '#d5b078';
+      ctx.fillRect(-17,top+1,26,1.4);
+      ctx.fillStyle = '#c9ac77';
       ctx.beginPath();
-      ctx.roundRect(-15, -this.h + 8, 30, 26, [4]);
+      ctx.arc(-4,top+38,5.5,0,Math.PI*2);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(9, 132, 227, 0.4)';
+      ctx.strokeStyle = '#44584b';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(-4,top+38);
+      ctx.lineTo(this.dispenseAnim>0 ? -7 : -1,top+35);
       ctx.stroke();
-
-      // 粮仓里金黄的粮食粒
-      ctx.fillStyle = '#f39c12';
-      for (let rx = -10; rx <= 10; rx += 6) {
-        for (let ry = -this.h + 13; ry <= -this.h + 28; ry += 6) {
-          ctx.beginPath();
-          ctx.arc(rx, ry, 1.8, 0, Math.PI * 2);
-          ctx.fill();
-        }
+      ctx.fillStyle = '#263e38';
+      ctx.fillRect(-9,-15,15,8);
+      ctx.fillStyle = '#be9460';
+      ctx.beginPath();
+      ctx.roundRect(-21,-6,47,8,4);
+      ctx.fill();
+      ctx.fillStyle = '#688778';
+      ctx.beginPath();
+      ctx.ellipse(10,-6,14,4.5,0,0,Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#e0ad65';
+      for (let i=0;i<Math.min(4,this.foodBowlLevel);i++) {
+        ctx.fillRect(4+i*3,-8+(i%2),2.6,2);
       }
-
-      // 呼吸指示灯
-      const isDispensing = this.dispenseAnim > 0;
-      ctx.fillStyle = isDispensing ? '#2ed573' : '#10ac84';
-      ctx.shadowColor = '#2ed573';
-      ctx.shadowBlur = isDispensing ? 10 : 3;
-      ctx.beginPath();
-      ctx.arc(0, -this.h + 40, 3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-
-      // 机器品牌 LOGO
-      ctx.fillStyle = '#747d8c';
-      ctx.font = 'bold 7px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('AUTO FEED', 0, -15);
 
       ctx.restore();
     }
@@ -1240,28 +1227,36 @@
       const flutter = Math.sin(this.flutterPhase) * 0.25;
       ctx.rotate(flutter + this.offsetX * 0.02);
 
-      // 主色绒球
-      ctx.fillStyle = this.color;
-      ctx.beginPath();
-      ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
-      ctx.fill();
-
-      // 绒球高光
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
-      ctx.beginPath();
-      ctx.arc(-3, -3, 4, 0, Math.PI * 2);
-      ctx.fill();
-
-      // 飘逸羽毛束
-      FEATHER_COLORS.forEach((fc, idx) => {
-        ctx.fillStyle = fc;
+      // A stitched comet and three tapered silk streamers.
+      for (let i=0; i<3; i++) {
+        ctx.save();
+        ctx.rotate((i-1)*.43);
+        ctx.fillStyle = COMET_RIBBONS[i];
         ctx.beginPath();
-        const angle = 0.5 + idx * 0.5 + flutter * 0.5;
-        const fx = Math.cos(angle) * 14;
-        const fy = 10 + Math.sin(angle) * 12;
-        ctx.ellipse(fx, fy, 4, 12, angle, 0, Math.PI * 2);
+        ctx.moveTo(-3,4);
+        ctx.bezierCurveTo(-7,12,5,17,0,29-i*2);
+        ctx.bezierCurveTo(12,17,1,13,4,4);
         ctx.fill();
-      });
+        ctx.restore();
+      }
+      ctx.fillStyle = '#dfa957';
+      ctx.strokeStyle = '#92673f';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i=0;i<10;i++) {
+        const angle = -Math.PI/2 + i*Math.PI/5;
+        const r = this.radius * (i%2 ? .66 : 1.09);
+        const x = Math.cos(angle)*r, y = Math.sin(angle)*r;
+        if (i===0) ctx.moveTo(x,y);
+        else ctx.lineTo(x,y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#fce2a0';
+      ctx.beginPath();
+      ctx.ellipse(-2,-3,2,3,.55,0,Math.PI*2);
+      ctx.fill();
 
       ctx.restore();
       ctx.restore();

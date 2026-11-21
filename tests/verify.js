@@ -674,7 +674,8 @@ test('Q萌猫团子灵动立体双眼与白猫异瞳配置', () => {
   const mockCtx = {
     save: noop, restore: noop, translate: noop, scale: noop, rotate: noop,
     beginPath: noop, ellipse: noop, arc: noop, fill: noop, stroke: noop,
-    moveTo: noop, lineTo: noop, closePath: noop, quadraticCurveTo: noop,
+    moveTo: noop, lineTo: noop, closePath: noop, quadraticCurveTo: noop, bezierCurveTo: noop,
+    clip: noop, createLinearGradient: () => ({ addColorStop: noop }),
     fillText: noop, measureText: () => ({ width: 40 }), getTransform: () => ({ a: 1 }),
     setTransform: noop
   };
@@ -685,6 +686,171 @@ test('Q萌猫团子灵动立体双眼与白猫异瞳配置', () => {
       cat.renderChibiLoaf(mockCtx, 1920, 1080, { eyeTracking: true });
     }, `Q萌猫团子在状态 ${st} 灵动双眼渲染抛异常`);
   });
+});
+
+// ---------------------------------------------------------------------------
+// 5.6 猫咪落脚扫掠回归：首次穿越、斜向高速、斜面与单向地面
+// ---------------------------------------------------------------------------
+console.log('\n🐾 正在测试猫咪落脚扫掠...');
+
+test('落脚扫掠按首次穿越时刻选面，不受家具迭代顺序影响', () => {
+  const lower = { id: 'lower', x: 100, y: 320, w: 80, type: 'perch' };
+  const higher = { id: 'higher', x: 100, y: 280, w: 80, type: 'perch' };
+  const hit = CyberMeow.LandingResolver.findFirst({
+    startX: 100,
+    startY: 250,
+    endX: 100,
+    endY: 340,
+    radius: 10,
+    surfaces: [lower, higher]
+  });
+  assert.ok(hit, '没有检测到任一穿越面');
+  assert.strictEqual(hit.surface, higher, '选择了迭代顺序靠前但较晚穿越的面');
+  assert.ok(Math.abs(hit.time - 2 / 9) < 1e-9, `首穿时刻异常: ${hit.time}`);
+  assert.strictEqual(hit.startedInContact, false, '新着陆被误标为持续接触');
+});
+
+test('高速斜向首碰使用插值 X，后续接触保留位移', () => {
+  const surface = { id: 'narrow', x: 132, y: 319.2, w: 8, type: 'perch' };
+  const furniture = { type: 'perch', getPerchSurfaces: () => [surface] };
+  const cat = new Cat(115, 260, {
+    breed: BREEDS[0],
+    radius: 20,
+    vx: 11.5,
+    vy: 16,
+    state: 'zoomies'
+  });
+  cat.stateTimer = 1000;
+  cat.update(800, 700, {
+    cats: [],
+    furniture: [furniture],
+    toys: [],
+    dt: 0.05,
+    spawnParticle: noop
+  });
+  assert.strictEqual(cat.perchedTier, 'narrow', '高速斜向位移漏掉了中途穿过的窄平台');
+  assert.ok(cat.x > 137 && cat.x < 142, `落点未回退到插值 X: ${cat.x}`);
+  assert.ok(Math.abs(cat.y + cat.radius - surface.y) < 1e-9, '落点高度未贴合平台');
+
+  surface.w = 80;
+  cat.vx = 2;
+  const continuedFromX = cat.x;
+  cat.update(800, 700, {
+    cats: [],
+    furniture: [furniture],
+    toys: [],
+    dt: 1 / 60,
+    spawnParticle: noop
+  });
+  assert.strictEqual(cat.perchedTier, 'narrow', '持续接触时丢失了落脚面');
+  assert.ok(cat.x > continuedFromX, `持续接触把切向位移回卷到了起点: ${cat.x}`);
+});
+
+test('斜面落脚高度按命中 X 计算', () => {
+  const slope = { id: 'slope', x: 100, y: 300, w: 120, slope: 0.25, type: 'perch' };
+  const hit = CyberMeow.LandingResolver.findFirst({
+    startX: 60,
+    startY: 260,
+    endX: 140,
+    endY: 310,
+    radius: 20,
+    surfaces: [slope]
+  });
+  assert.ok(hit, '斜面穿越未被检测');
+  assert.ok(Math.abs(hit.time - 1 / 3) < 1e-9, `斜面首穿时刻异常: ${hit.time}`);
+  assert.ok(Math.abs(hit.x - 260 / 3) < 1e-9, `斜面命中 X 异常: ${hit.x}`);
+  assert.ok(Math.abs(hit.y + 20 - 890 / 3) < 1e-9, `斜面命中高度异常: ${hit.y + 20}`);
+  assert.strictEqual(hit.startedInContact, false, '斜面新着陆被误标为持续接触');
+});
+
+test('上升可穿台，反重力下降仍落脚且地面反弹', () => {
+  const surface = { id: 'one-way', x: 100, y: 300, w: 80, type: 'perch' };
+  const rising = CyberMeow.LandingResolver.findFirst({
+    startX: 100,
+    startY: 300,
+    endX: 100,
+    endY: 280,
+    surfaces: [surface]
+  });
+  assert.strictEqual(rising, null, '上升起跳被单向平台错误拦截');
+
+  const previousMode = CyberMeow.physicsWorld.gravityMode;
+  CyberMeow.physicsWorld.gravityMode = 'antigravity';
+  try {
+    const furniture = { type: 'perch', getPerchSurfaces: () => [surface] };
+    const landingCat = new Cat(100, 278, {
+      breed: BREEDS[0], radius: 20, vx: 0, vy: 4, state: 'jumping'
+    });
+    landingCat.stateTimer = 1000;
+    landingCat.update(800, 700, {
+      cats: [], furniture: [furniture], toys: [], dt: 1 / 60, spawnParticle: noop
+    });
+    assert.strictEqual(landingCat.perchedTier, 'one-way', '反重力模式下下降穿越未落脚');
+
+    const floorCenterY = CyberMeow.physicsWorld.getFloorY(700) - landingCat.radius;
+    const floorCat = new Cat(100, floorCenterY - 2, {
+      breed: BREEDS[0], radius: 20, vx: 0, vy: 4, state: 'jumping'
+    });
+    floorCat.stateTimer = 1000;
+    floorCat.update(800, 700, {
+      cats: [], furniture: [], toys: [], dt: 1 / 60, spawnParticle: noop
+    });
+    assert.strictEqual(floorCat.y, floorCenterY, '地面穿越未收敛到地面高度');
+    assert.ok(floorCat.vy < 0, '带速度落地后未执行地面反弹');
+  } finally {
+    CyberMeow.physicsWorld.gravityMode = previousMode;
+  }
+});
+
+test('地面持续接触保留切向行走位移', () => {
+  const floorCenterY = CyberMeow.physicsWorld.getFloorY(700) - 20;
+  const cat = new Cat(100, floorCenterY, {
+    breed: BREEDS[0], radius: 20, vx: 2, vy: 0, state: 'walking'
+  });
+  cat.stateTimer = 1000;
+  cat.update(800, 700, {
+    cats: [], furniture: [], toys: [], dt: 1 / 60, spawnParticle: noop
+  });
+  assert.ok(cat.x > 100, `地面接触冻结了切向 X: ${cat.x}`);
+  assert.strictEqual(cat.y, floorCenterY, '地面接触未保持竖直高度');
+});
+
+test('已有平台接触可继续行走并离开边缘', () => {
+  const surface = { id: 'walk-off', x: 100, y: 300, w: 40, type: 'perch' };
+  const furniture = { type: 'perch', getPerchSurfaces: () => [surface] };
+  const cat = new Cat(118, 280, {
+    breed: BREEDS[0], radius: 20, vx: 4, vy: 0, state: 'walking'
+  });
+  cat.stateTimer = 1000;
+  cat.perchedTier = surface.id;
+  const scene = { cats: [], furniture: [furniture], toys: [], dt: 1 / 60, spawnParticle: noop };
+
+  const startX = cat.x;
+  cat.update(800, 700, scene);
+  assert.ok(cat.x > startX, `已有平台接触冻结了切向 X: ${cat.x}`);
+  assert.strictEqual(cat.perchedTier, surface.id, '仍在平台范围内却提前脱离');
+
+  for (let i = 0; i < 6 && cat.perchedTier; i++) cat.update(800, 700, scene);
+  assert.strictEqual(cat.perchedTier, null, '猫咪无法从平台边缘走出');
+});
+
+test('移动斜面持续接触保留 X 并按末位置贴合高度', () => {
+  const surface = { id: 'moving-slope', x: 100, y: 300, w: 120, slope: 0.1, type: 'perch' };
+  const furniture = { type: 'perch', getPerchSurfaces: () => [surface] };
+  const cat = new Cat(100, 280, {
+    breed: BREEDS[0], radius: 20, vx: 2, vy: 0, state: 'walking'
+  });
+  cat.stateTimer = 1000;
+  cat.perchedTier = surface.id;
+
+  surface.x = 96;
+  cat.update(800, 700, {
+    cats: [], furniture: [furniture], toys: [], dt: 1 / 60, spawnParticle: noop
+  });
+  assert.ok(cat.x > 100, `移动斜面接触冻结了切向 X: ${cat.x}`);
+  assert.strictEqual(cat.perchedTier, surface.id, '移动斜面接触被误判为新着陆');
+  const expectedY = CyberMeow.LandingResolver.getSurfaceYAt(surface, cat.x) - cat.radius;
+  assert.ok(Math.abs(cat.y - expectedY) < 1e-9, '移动斜面未按末位置 X 贴合高度');
 });
 
 // ---------------------------------------------------------------------------

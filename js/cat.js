@@ -20,7 +20,7 @@
 (function(window) {
   'use strict';
 
-  const { MathUtils, VerletChain, physicsWorld, soundEngine } = window.CyberMeow;
+  const { MathUtils, VerletChain, LandingResolver, physicsWorld, soundEngine } = window.CyberMeow;
 
   const TAU = Math.PI * 2;
   const lerp = (a, b, t) => a + (b - a) * t;
@@ -171,115 +171,163 @@
     return (typeof window !== 'undefined' && window.CyberMeow && window.CyberMeow.renderQuality) || 'high';
   }
 
-  // ============================================================================
-  // 1.5. 离屏程序化猫团子贴图预烘焙缓存 (Procedural Chibi Sprite Baking Cache)
-  // 为各大品种预烘焙静态身体底板，大幅减少逐帧贝塞尔曲线计算与填充调用 (节省 80% 渲染开销)
-  // ============================================================================
+  const MOCHI_INK = '#533e33';
+  const MOCHI_FACE_Y = -.86;
+  const MOCHI_EYES = [-.31, .42];
+  const MOCHI_PAWS = [-.43, .43];
+  const MOCHI_WHISKERS = [-1, 1];
+
+  // One silhouette for the vector fallback and the cached pose.
+  function traceMochi(ctx) {
+    ctx.beginPath();
+    ctx.moveTo(-1.04, -.47);
+    ctx.bezierCurveTo(-1.17, -.77, -1.03, -1.09, -.81, -1.24);
+    ctx.quadraticCurveTo(-.85, -1.54, -.73, -1.78);
+    ctx.quadraticCurveTo(-.66, -1.91, -.56, -1.80);
+    ctx.lineTo(-.30, -1.51);
+    ctx.quadraticCurveTo(.07, -1.59, .37, -1.49);
+    ctx.quadraticCurveTo(.55, -1.71, .66, -1.80);
+    ctx.quadraticCurveTo(.76, -1.88, .82, -1.74);
+    ctx.quadraticCurveTo(.91, -1.49, .84, -1.24);
+    ctx.bezierCurveTo(1.03, -1.07, 1.17, -.73, 1.06, -.47);
+    ctx.bezierCurveTo(.91, -.13, .56, -.08, 0, -.08);
+    ctx.bezierCurveTo(-.51, -.08, -.91, -.14, -1.04, -.47);
+    ctx.closePath();
+  }
+
+  function drawMochiBase(ctx, breed) {
+    const coat = ctx.createLinearGradient(0, -1.82, 0, -.07);
+    coat.addColorStop(0, breed.lightColor);
+    coat.addColorStop(.55, breed.bodyColor);
+    coat.addColorStop(1, breed.shadowColor);
+    ctx.save();
+    traceMochi(ctx);
+    ctx.fillStyle = coat;
+    ctx.fill();
+    ctx.clip();
+
+    if (breed.hasPatches) {
+      ctx.fillStyle = '#d78b52';
+      ctx.beginPath();
+      ctx.ellipse(-.7, -1.19, .49, .59, -.38, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = '#50413c';
+      ctx.beginPath();
+      ctx.ellipse(.73, -1.38, .42, .49, .48, 0, TAU);
+      ctx.fill();
+    } else if (breed.tabby || breed.hasStripes) {
+      ctx.strokeStyle = breed.stripeColor;
+      ctx.lineCap = 'round';
+      ctx.lineWidth = .074;
+      ctx.globalAlpha = .58;
+      ctx.beginPath();
+      for (let x = -.22; x < .3; x += .22) {
+        ctx.moveTo(x, -1.53);
+        ctx.quadraticCurveTo(x * .9, -1.41, x * .74, -1.28 - Math.abs(x) * .18);
+      }
+      ctx.moveTo(-1.02, -.72);
+      ctx.quadraticCurveTo(-.91, -.67, -.86, -.59);
+      ctx.moveTo(.99, -.74);
+      ctx.quadraticCurveTo(.93, -.68, .87, -.6);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else if (breed.hasMask || breed.isPointColor) {
+      ctx.fillStyle = breed.isPointColor ? breed.pointColor : breed.bellyColor;
+      ctx.globalAlpha = breed.isPointColor ? .62 : .93;
+      ctx.beginPath();
+      ctx.ellipse(.09, -.53, breed.isPointColor ? .62 : .53, .41, -.08, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    if (!breed.hasMask && !breed.isPointColor) {
+      ctx.fillStyle = breed.bellyColor;
+      ctx.globalAlpha = .45;
+      ctx.beginPath();
+      ctx.ellipse(.03, -.26, .71, .31, 0, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = breed.earColor;
+    ctx.beginPath();
+    ctx.moveTo(-.70, -1.65);
+    ctx.quadraticCurveTo(-.67, -1.75, -.61, -1.67);
+    ctx.lineTo(-.48, -1.51);
+    ctx.quadraticCurveTo(-.59, -1.48, -.74, -1.35);
+    ctx.closePath();
+    ctx.moveTo(.70, -1.66);
+    ctx.quadraticCurveTo(.74, -1.73, .77, -1.65);
+    ctx.quadraticCurveTo(.83, -1.48, .78, -1.39);
+    ctx.quadraticCurveTo(.71, -1.47, .57, -1.50);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = breed.isPointColor ? '#d1a195' : '#ef9e93';
+    ctx.globalAlpha = .54;
+    ctx.beginPath();
+    ctx.ellipse(-.66, -.68, .16, .075, .1, 0, TAU);
+    ctx.moveTo(.88, -.68);
+    ctx.ellipse(.72, -.68, .16, .075, -.1, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    traceMochi(ctx);
+    ctx.strokeStyle = MOCHI_INK;
+    ctx.lineWidth = .046;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  }
+
   const ChibiBakeCache = {
     sprites: new Map(),
     init(breeds) {
-      if (typeof document === 'undefined' || !document.createElement) return;
-      try {
-        breeds.forEach(breed => {
-          const size = 128;
-          const c = document.createElement('canvas');
-          c.width = size;
-          c.height = size;
-          const bCtx = c.getContext('2d');
-          if (!bCtx) return;
-
-          const cx = size * 0.48;
-          const cy = size * 0.95;
-          const R = 22;
-
-          bCtx.save();
-          bCtx.translate(cx, cy);
-
-          // 1. 身体
-          bCtx.fillStyle = breed.bodyColor;
-          bCtx.beginPath();
-          bCtx.ellipse(0, -R * 0.8, R * 1.18, R * 0.92, 0, 0, TAU);
-          bCtx.fill();
-
-          // 2. 品种专属斑纹
-          if (breed.hasStripes) {
-            bCtx.strokeStyle = breed.stripeColor || '#b35b14';
-            bCtx.lineWidth = 2.5;
-            bCtx.lineCap = 'round';
-            [-0.3, 0.0, 0.3].forEach(off => {
-              bCtx.beginPath();
-              bCtx.arc(R * off, -R * 1.3, R * 0.45, Math.PI * 0.2, Math.PI * 0.8);
-              bCtx.stroke();
-            });
-          } else if (breed.hasPatches) {
-            bCtx.fillStyle = '#e58e35';
-            bCtx.beginPath();
-            bCtx.ellipse(-R * 0.4, -R * 1.1, R * 0.35, R * 0.25, 0.4, 0, TAU);
-            bCtx.fill();
-            bCtx.fillStyle = '#273240';
-            bCtx.beginPath();
-            bCtx.ellipse(R * 0.3, -R * 0.8, R * 0.3, R * 0.2, -0.3, 0, TAU);
-            bCtx.fill();
-          }
-
-          // 3. 浅色白肚皮
-          bCtx.fillStyle = breed.bellyColor;
-          bCtx.beginPath();
-          bCtx.ellipse(R * 0.15, -R * 0.55, R * 0.78, R * 0.52, 0, 0, TAU);
-          bCtx.fill();
-
-          // 4. 小脚爪底
-          bCtx.fillStyle = breed.socks ? breed.bellyColor : (breed.lightColor || breed.bodyColor);
-          bCtx.beginPath();
-          bCtx.arc(R * 0.45, -2, 4.5, 0, TAU);
-          bCtx.arc(-R * 0.1, -2, 4.5, 0, TAU);
-          bCtx.fill();
-
-          // 5. 双耳
-          const earSpread = R * 0.55;
-          const earY = -R * 1.45;
-          const drawEar = (ex, ey) => {
-            bCtx.fillStyle = breed.isPointColor ? breed.pointColor : breed.bodyColor;
-            bCtx.beginPath();
-            bCtx.moveTo(ex - 7, ey + 4);
-            bCtx.lineTo(ex, ey - 12);
-            bCtx.lineTo(ex + 7, ey + 4);
-            bCtx.closePath();
-            bCtx.fill();
-
-            bCtx.fillStyle = breed.earColor || '#eea0a0';
-            bCtx.beginPath();
-            bCtx.moveTo(ex - 4, ey + 3);
-            bCtx.lineTo(ex, ey - 7);
-            bCtx.lineTo(ex + 4, ey + 3);
-            bCtx.closePath();
-            bCtx.fill();
-          };
-          drawEar(-earSpread, earY);
-          drawEar(R * 0.15, earY);
-
-          // 6. 重点色面罩
-          if (breed.isPointColor) {
-            bCtx.fillStyle = breed.pointColor;
-            bCtx.beginPath();
-            bCtx.ellipse(R * 0.42, -R * 0.75, R * 0.45, R * 0.38, 0, 0, TAU);
-            bCtx.fill();
-          }
-
-          bCtx.restore();
-          this.sprites.set(breed.id, { canvas: c, size });
-        });
-      } catch (err) {}
+      if (typeof document === 'undefined') return;
+      const radius = 31;
+      const size = 96;
+      const origin = { x: 48, y: 77 };
+      for (const breed of breeds) {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) continue;
+        ctx.translate(origin.x, origin.y);
+        ctx.scale(radius, radius);
+        drawMochiBase(ctx, breed);
+        this.sprites.set(breed.id, { canvas, size, origin, r: radius, breed });
+      }
     },
     get(breedId) {
-      if (this.sprites.size === 0 && typeof BREEDS_CONFIG !== 'undefined') {
-        this.init(BREEDS_CONFIG);
-      }
+      if (!this.sprites.size) this.init(BREEDS_CONFIG);
       return this.sprites.get(breedId);
     }
   };
 
-  // 起跳弹道计算
+  function mochiPose(cat) {
+    const brisk = Math.abs(cat.vx || 0) > .55;
+    const phase = (cat.walkCycle || 0) * 1.5;
+    const resting = cat.state === 'loaf' || cat.state === 'sleeping';
+    const airborne = ['jumping', 'pouncing', 'aerial_pounce_drop'].includes(cat.state);
+    const wobble = Math.sin(brisk ? phase * 2 : Date.now() * .004 + (cat.x || 0) * .06);
+    const spring = cat._mochiLanding || 0;
+    let sx = 1 + wobble * (brisk ? .04 : .018) + spring * .14;
+    let sy = 1 - wobble * (brisk ? .055 : .022) - spring * .18;
+    let angle = brisk ? Math.sin(phase) * .042 : 0;
+    if (cat.isGrabbed || cat.state === 'grabbed') {
+      sx *= .78;
+      sy *= clamp(cat.grabStretch || 1.25, 1.08, 1.65);
+    } else if (airborne) {
+      sx *= .9;
+      sy *= 1.11;
+      angle = Math.atan2(cat.vy || 0, Math.abs(cat.vx || 0) + 4) * .34;
+    } else if (cat.state === 'climbing') {
+      angle = -.53;
+    } else if (resting || ['crouch', 'stalking', 'stealth_stalk', 'stealth_freeze', 'aerial_pounce_aim'].includes(cat.state)) {
+      sx *= 1.12;
+      sy *= resting ? .78 : .83;
+    }
+    return { sx, sy, angle, phase, resting, brisk, airborne };
+  }
+
   function calcJumpArc(rise, fallOffset = 1) {
     const g = physicsWorld.getGravity();
     if (!Number.isFinite(g) || g <= 0) return null;
@@ -405,6 +453,66 @@
     }
   }
 
+  const STUDIO_FUR_SRC = 'assets/studio-fur.webp';
+  const _studioFur = {
+    image: null,
+    state: 'idle',
+    patterns: new WeakMap()
+  };
+
+  function getStudioFurImage() {
+    if (_studioFur.state === 'ready') return _studioFur.image;
+    if (_studioFur.state === 'failed' || _studioFur.state === 'loading') return null;
+    if (typeof window === 'undefined' || typeof window.Image !== 'function') {
+      _studioFur.state = 'failed';
+      return null;
+    }
+
+    _studioFur.state = 'loading';
+    const image = new window.Image();
+    image.decoding = 'async';
+    image.onload = () => {
+      _studioFur.image = image;
+      _studioFur.state = 'ready';
+    };
+    image.onerror = () => {
+      _studioFur.image = null;
+      _studioFur.state = 'failed';
+    };
+    image.src = STUDIO_FUR_SRC;
+    return null;
+  }
+
+  function getStudioFurPattern(ctx) {
+    const image = getStudioFurImage();
+    if (!image || !ctx || typeof ctx.createPattern !== 'function') return null;
+    let pattern = _studioFur.patterns.get(ctx);
+    if (!pattern) {
+      try {
+        pattern = ctx.createPattern(image, 'repeat');
+      } catch (err) {
+        return null;
+      }
+      if (pattern) _studioFur.patterns.set(ctx, pattern);
+    }
+    return pattern ? { pattern, image } : null;
+  }
+
+  function paintStudioFur(ctx, texture, tileSize, angle, alpha, blendMode, center) {
+    if (!texture) return;
+    const sourceSize = Math.max(1, texture.image.naturalWidth || texture.image.width || 512);
+    const scale = tileSize / sourceSize;
+    ctx.save();
+    ctx.globalCompositeOperation = blendMode;
+    ctx.globalAlpha = alpha;
+    ctx.translate(center.x, center.y);
+    ctx.rotate(angle);
+    ctx.scale(scale, scale);
+    ctx.fillStyle = texture.pattern;
+    ctx.fillRect(-4096, -4096, 8192, 8192);
+    ctx.restore();
+  }
+
   // ============================================================================
   // 4. ANALYTIC 2-BONE IK & SEAMLESS ZERO-HOLE LIMB RENDERING (两段解析式 IK)
   // ============================================================================
@@ -464,10 +572,11 @@
       const d = Math.hypot(dx, dy) || 0.001;
       const nx = -dy / d;
       const ny = dx / d;
-      ctx.moveTo(s.a.x + nx * s.ra, s.a.y + ny * s.ra);
-      ctx.lineTo(s.b.x + nx * s.rb, s.b.y + ny * s.rb);
+      // Wind the segment in the same direction as its joint discs.
+      ctx.moveTo(s.a.x - nx * s.ra, s.a.y - ny * s.ra);
       ctx.lineTo(s.b.x - nx * s.rb, s.b.y - ny * s.rb);
-      ctx.lineTo(s.a.x - nx * s.ra, s.a.y - ny * s.ra);
+      ctx.lineTo(s.b.x + nx * s.rb, s.b.y + ny * s.rb);
+      ctx.lineTo(s.a.x + nx * s.ra, s.a.y + ny * s.ra);
       ctx.closePath();
     }
     for (let i = 0; i < discs.length; i++) {
@@ -603,6 +712,14 @@
 
       // 渲染渐变缓存：局部坐标系下参数固定的渐变跨帧复用，避免每帧 createGradient
       this._gradCache = new Map();
+    }
+
+    // Render and pointer hit testing share the same foot line.
+    get visualFootY() {
+      const radius = Number.isFinite(this.radius) ? this.radius : 22;
+      if (this.ridingObj?.type === 'roomba') return this.ridingObj.y - this.ridingObj.height;
+      if (this.inBox) return this.inBox.y - this.inBox.h / 2 + radius * .88;
+      return this.y + radius;
     }
 
     speak(text) {
@@ -845,18 +962,18 @@
       ctx.restore();
     }
 
-    _drawGemEye(ctx, cx, cy, rx, ry, slant, irisColor, browWeight, gazeX, gazeY, isRight) {
-      const lowQuality = currentRenderQuality() === 'low';
+    _drawGemEye(ctx, cx, cy, rx, ry, slant, irisColor, browWeight, gazeX, gazeY, isRight, closeUp) {
+      const lowQuality = !closeUp && currentRenderQuality() === 'low';
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(slant);
 
       const innerX = isRight ? -rx : rx;
       const outerX = isRight ? rx : -rx;
-      const blinkAmt = this._blinkAmt;
+      const blinkAmt = closeUp?.blink ?? this._blinkAmt;
 
       // 呼噜眯眯眼 (^ ^)
-      if (this.purrLevel > 0.72) {
+      if (closeUp ? closeUp.happy : this.purrLevel > 0.72) {
         ctx.strokeStyle = 'rgba(24, 28, 34, 0.85)';
         ctx.lineWidth = 1.9;
         ctx.lineCap = 'round';
@@ -869,7 +986,7 @@
       }
 
       // 高台蔑视审视冷漠眼 (- -)
-      if (this.state === 'judging_overlook') {
+      if (!closeUp && this.state === 'judging_overlook') {
         ctx.strokeStyle = 'rgba(24, 28, 34, 0.9)';
         ctx.lineWidth = 2.4;
         ctx.lineCap = 'round';
@@ -944,7 +1061,8 @@
       }
 
       // 动态瞳孔调节 (年龄/激光挫败感/捕猎注视联动)
-      const dil = clamp(this.pupilDilation + (this.laserFrustration / 100) * 0.35 + (1 - this.age) * 0.22, 0.1, 1.0);
+      const dilation = this.pupilDilation + (this.laserFrustration / 100) * 0.35 + (1 - this.age) * 0.22;
+      const dil = closeUp?.angry ? .12 : clamp(dilation, .1, 1);
       ctx.fillStyle = '#0c0f15';
       ctx.beginPath();
       ctx.ellipse(gx, gy, rx * lerp(0.20, 0.78, dil), ry * lerp(0.78, 0.86, dil), 0, 0, TAU);
@@ -991,6 +1109,677 @@
       ctx.restore();
     }
 
+    _drawProfileBody(ctx, hip, sh, neckTop, legScale, furPattern) {
+      const { breed } = this;
+      const bcsNorm = clamp((this.bcs - 2) / 7, 0, 1);
+      const fluff = this.fluff;
+      const bodyLength = Math.max(64, sh.x - hip.x);
+      const backRise = lerp(17.5, 22.5, bcsNorm) + fluff * 2.2;
+      const bellyDrop = lerp(20.5, 28.5, bcsNorm) + fluff * 2.4;
+      const topY = Math.min(hip.y, sh.y) - backRise;
+      const bellyY = Math.max(hip.y, sh.y) + bellyDrop;
+      const tailDock = { x: hip.x - 8, y: topY + 10 };
+      const neckBase = {
+        x: neckTop.x + 4,
+        y: Math.min(neckTop.y + 7, topY + 8)
+      };
+      const chest = {
+        x: sh.x + 22 * legScale + fluff * 1.8,
+        y: sh.y + 13 * legScale
+      };
+      const frontPawX = sh.x + 8 * legScale;
+      const hindPawX = hip.x - 12 * legScale;
+      const hindHeelX = hindPawX - 8 * legScale;
+
+      const drawFarLeg = (root, pawX, isHind) => {
+        const jointY = lerp(root.y, -2, isHind ? .55 : .60);
+        const jointX = pawX + (isHind ? -4 : 2) * legScale;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = breed.shadowColor;
+        ctx.globalAlpha = isHind ? .34 : .31;
+        ctx.lineWidth = (isHind ? 12.5 : 9.5) * legScale;
+        ctx.beginPath();
+        ctx.moveTo(root.x, root.y + 2);
+        ctx.bezierCurveTo(
+          root.x + (isHind ? 3 : -2), jointY,
+          jointX, jointY + 12,
+          pawX, -2.5
+        );
+        ctx.stroke();
+        ctx.strokeStyle = breed.bodyColor;
+        ctx.globalAlpha = .34;
+        ctx.lineWidth = (isHind ? 7.5 : 5.4) * legScale;
+        ctx.stroke();
+        ctx.fillStyle = breed.bodyColor;
+        ctx.globalAlpha = .42;
+        ctx.beginPath();
+        ctx.ellipse(pawX + 2.4 * legScale, -2.1, 7.2 * legScale, 3.2 * legScale, 0, 0, TAU);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      };
+
+      drawFarLeg({ x: hip.x + 1, y: hip.y - 1 }, hip.x - 1, true);
+      drawFarLeg({ x: sh.x - 2, y: sh.y + 1 }, sh.x - 5, false);
+
+      const traceBody = () => {
+        ctx.beginPath();
+        ctx.moveTo(tailDock.x, tailDock.y);
+        ctx.bezierCurveTo(
+          hip.x - 9, topY + 4,
+          hip.x - 4, topY,
+          hip.x + 7, topY + 1
+        );
+        ctx.bezierCurveTo(
+          hip.x + bodyLength * .29, topY + 4,
+          sh.x - bodyLength * .25, topY + 3,
+          sh.x - 2, topY + 1
+        );
+        ctx.bezierCurveTo(
+          sh.x + 7, topY - 1,
+          neckTop.x - 1, neckTop.y + 3,
+          neckBase.x, neckBase.y
+        );
+        ctx.bezierCurveTo(
+          neckBase.x + 6, neckBase.y + 10,
+          chest.x - 9, chest.y - 15,
+          chest.x, chest.y
+        );
+        ctx.bezierCurveTo(
+          chest.x + 2, chest.y + 10,
+          frontPawX + 6, sh.y + 18,
+          frontPawX + 4, -7
+        );
+        ctx.bezierCurveTo(
+          frontPawX + 8, -3,
+          frontPawX + 10, 0,
+          frontPawX + 4, 0
+        );
+        ctx.bezierCurveTo(
+          frontPawX, .6,
+          frontPawX - 5, .4,
+          frontPawX - 7, -1
+        );
+        ctx.bezierCurveTo(
+          frontPawX - 5, -7,
+          frontPawX - 3, -13,
+          frontPawX - 3, -20
+        );
+        ctx.bezierCurveTo(
+          frontPawX - 2, -25,
+          sh.x + 17, bellyY - 3,
+          sh.x + 10, bellyY
+        );
+        ctx.bezierCurveTo(
+          lerp(sh.x, hip.x, .70), bellyY + 2,
+          lerp(sh.x, hip.x, .35), bellyY + 1,
+          hip.x + 10, bellyY + 1
+        );
+        ctx.bezierCurveTo(
+          hip.x + 4, bellyY - 1,
+          hip.x - 3, bellyY - 1,
+          hip.x - 9, bellyY - 4
+        );
+        ctx.bezierCurveTo(
+          hip.x - 12, bellyY - 7,
+          hip.x - 16, hip.y + 8,
+          hip.x - 21, -13
+        );
+        ctx.bezierCurveTo(
+          hip.x - 26, -9,
+          hip.x - 31, -5,
+          hindPawX + 1, -3
+        );
+        ctx.bezierCurveTo(
+          hindPawX + 1, -1,
+          hindPawX + 3, 0,
+          hindPawX + 5, 0
+        );
+        ctx.bezierCurveTo(
+          hindPawX - 1, .8,
+          hindPawX - 7, .8,
+          hindHeelX, 0
+        );
+        ctx.bezierCurveTo(
+          hindHeelX - 1, -9,
+          hindHeelX - 1, -17,
+          hip.x - 17, -23
+        );
+        ctx.bezierCurveTo(
+          hip.x - 24, -30,
+          hip.x - 25, -42,
+          tailDock.x - 2, tailDock.y + 5
+        );
+        ctx.bezierCurveTo(
+          hip.x - 5, topY + 16,
+          hip.x - 6, topY + 11,
+          tailDock.x, tailDock.y
+        );
+        ctx.closePath();
+      };
+
+      ctx.save();
+      traceBody();
+      ctx.clip();
+
+      const coat = ctx.createLinearGradient(0, topY, 0, bellyY + 15);
+      coat.addColorStop(0, breed.lightColor);
+      coat.addColorStop(.28, breed.bodyColor);
+      coat.addColorStop(.72, breed.bodyColor);
+      coat.addColorStop(1, breed.shadowColor);
+      ctx.fillStyle = coat;
+      ctx.fillRect(-160, -180, 320, 190);
+
+      const shoulderLight = ctx.createRadialGradient(
+        sh.x - 2, sh.y - 14, 1,
+        sh.x - 2, sh.y - 14, 34
+      );
+      shoulderLight.addColorStop(0, 'rgba(255,255,255,.23)');
+      shoulderLight.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = shoulderLight;
+      ctx.fillRect(hip.x - 20, topY - 8, bodyLength + 46, bellyY - topY + 28);
+
+      const bellyShade = ctx.createRadialGradient(
+        hip.x + bodyLength * .46, bellyY - 1, 2,
+        hip.x + bodyLength * .46, bellyY - 1, 46
+      );
+      bellyShade.addColorStop(0, 'rgba(20,24,28,.10)');
+      bellyShade.addColorStop(1, 'rgba(20,24,28,0)');
+      ctx.fillStyle = bellyShade;
+      ctx.fillRect(hip.x - 20, bellyY - 28, bodyLength + 46, 38);
+
+      if (breed.tabby || breed.hasStripes) {
+        ctx.strokeStyle = breed.stripeColor;
+        ctx.lineCap = 'round';
+        ctx.globalAlpha = .56;
+        ctx.lineWidth = Math.max(3.1, bodyLength * .045);
+        for (let i = 0; i < 5; i++) {
+          const sx = hip.x + 10 + i * bodyLength * .17;
+          ctx.beginPath();
+          ctx.moveTo(sx, topY + 1);
+          ctx.bezierCurveTo(
+            sx - 3, topY + 12,
+            sx - 8, bellyY - 12,
+            sx - 3, bellyY - 4
+          );
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      } else if (breed.hasPatches) {
+        ctx.fillStyle = '#c98253';
+        ctx.globalAlpha = .88;
+        ctx.beginPath();
+        ctx.ellipse(
+          hip.x + bodyLength * .34, topY + 19,
+          bodyLength * .28, 22, -.16, 0, TAU
+        );
+        ctx.fill();
+        ctx.fillStyle = '#403b3a';
+        ctx.globalAlpha = .90;
+        ctx.beginPath();
+        ctx.ellipse(
+          hip.x + 10, topY + 23,
+          bodyLength * .20, 24, .22, 0, TAU
+        );
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      } else if (breed.hasMask) {
+        ctx.fillStyle = breed.bellyColor;
+        ctx.globalAlpha = .86;
+        ctx.beginPath();
+        ctx.moveTo(neckBase.x - 5, neckBase.y + 2);
+        ctx.bezierCurveTo(
+          chest.x - 4, chest.y - 7,
+          chest.x - 1, chest.y + 12,
+          frontPawX + 2, -2
+        );
+        ctx.lineTo(frontPawX - 8, -1);
+        ctx.bezierCurveTo(
+          frontPawX - 13, sh.y + 18,
+          sh.x + 8, bellyY - 10,
+          sh.x - 3, bellyY - 14
+        );
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      if (breed.isPointColor) {
+        const points = ctx.createLinearGradient(0, bellyY - 17, 0, 2);
+        points.addColorStop(0, 'rgba(61,46,38,0)');
+        points.addColorStop(.56, 'rgba(61,46,38,.48)');
+        points.addColorStop(1, breed.pointColor);
+        ctx.fillStyle = points;
+        ctx.fillRect(hip.x - 35, bellyY - 18, bodyLength + 70, 20 - bellyY);
+      }
+
+      if (breed.socks || breed.isPointColor) {
+        ctx.fillStyle = breed.socks ? breed.bellyColor : breed.pointColor;
+        ctx.globalAlpha = breed.socks ? .94 : .78;
+        ctx.beginPath();
+        ctx.ellipse(frontPawX - 1, -3, 9.5, 5, 0, 0, TAU);
+        ctx.ellipse(hindPawX - 1, -3, 10, 5.2, 0, 0, TAU);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      if (furPattern) {
+        ctx.globalAlpha = .15;
+        ctx.fillStyle = furPattern;
+        ctx.fillRect(-160, -180, 320, 190);
+        ctx.globalAlpha = 1;
+      }
+
+      const studioFur = getStudioFurPattern(ctx);
+      paintStudioFur(
+        ctx, studioFur, 54, -.12, .20, 'soft-light',
+        { x: hip.x + bodyLength * .48, y: (topY + bellyY) * .5 }
+      );
+
+      ctx.strokeStyle = 'rgba(26,29,31,.10)';
+      ctx.lineWidth = 3.2;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(chest.x - 13, chest.y - 1);
+      ctx.bezierCurveTo(
+        frontPawX - 1, -12,
+        frontPawX - 3, sh.y + 18,
+        sh.x + 17, bellyY - 4
+      );
+      ctx.moveTo(hip.x - 6, bellyY - 2);
+      ctx.bezierCurveTo(
+        hip.x - 15, bellyY - 10,
+        hip.x - 19, -18,
+        hip.x - 27, -8
+      );
+      ctx.stroke();
+
+      ctx.strokeStyle = breed.lightColor;
+      ctx.globalAlpha = .26;
+      ctx.lineWidth = 1.35;
+      ctx.beginPath();
+      ctx.moveTo(tailDock.x + 2, tailDock.y + 1);
+      ctx.bezierCurveTo(
+        hip.x - 4, topY + 2,
+        sh.x - bodyLength * .28, topY + 3,
+        sh.x - 2, topY + 2
+      );
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+
+      ctx.save();
+      traceBody();
+      ctx.strokeStyle = 'rgba(35,33,32,.13)';
+      ctx.lineWidth = .8;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    _drawProfileHead(ctx, x, y, R, furPattern, expression) {
+      const { breed } = this;
+      const dna = this.dna;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(expression.tilt);
+
+      const drawEar = (isFar) => {
+        const earScale = clamp(dna.earSize, .78, 1.30);
+        const earX = isFar ? -R * .38 : -R * .04;
+        const earY = isFar ? -R * .48 : -R * .54;
+        const height = R * (isFar ? .53 : .61) * earScale;
+        const width = R * (isFar ? .21 : .27);
+        ctx.save();
+        ctx.translate(earX, earY);
+        ctx.rotate(expression.angry ? (isFar ? -.30 : -.23) : (isFar ? -.10 : .02));
+        ctx.fillStyle = isFar
+          ? breed.shadowColor
+          : (breed.isPointColor ? breed.pointColor : breed.bodyColor);
+        if (breed.hasPatches && !isFar) ctx.fillStyle = '#d27a43';
+        ctx.globalAlpha = isFar ? .92 : 1;
+        ctx.beginPath();
+        ctx.moveTo(-width, 2);
+        ctx.bezierCurveTo(
+          -width * .94, -height * .58,
+          -width * .40, -height * .97,
+          width * .06, -height
+        );
+        ctx.bezierCurveTo(
+          width * .67, -height * .68,
+          width * .92, -height * .24,
+          width, 2
+        );
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = breed.earColor;
+        ctx.globalAlpha = isFar ? .30 : .54;
+        ctx.beginPath();
+        ctx.moveTo(-width * .55, -height * .05);
+        ctx.bezierCurveTo(
+          -width * .46, -height * .42,
+          -width * .16, -height * .72,
+          width * .03, -height * .78
+        );
+        ctx.bezierCurveTo(
+          width * .37, -height * .53,
+          width * .49, -height * .23,
+          width * .52, -height * .04
+        );
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      };
+
+      drawEar(true);
+      drawEar(false);
+
+      const noseX = R * .79;
+      const noseY = -R * .045;
+      const traceHead = () => {
+        ctx.beginPath();
+        ctx.moveTo(-R * .60, R * .43);
+        ctx.bezierCurveTo(
+          -R * .82, R * .25,
+          -R * .84, -R * .18,
+          -R * .65, -R * .47
+        );
+        ctx.bezierCurveTo(
+          -R * .49, -R * .69,
+          -R * .18, -R * .73,
+          R * .04, -R * .59
+        );
+        ctx.bezierCurveTo(
+          R * .22, -R * .50,
+          R * .34, -R * .36,
+          R * .43, -R * .29
+        );
+        ctx.bezierCurveTo(
+          R * .58, -R * .22,
+          R * .72, -R * .16,
+          noseX, noseY
+        );
+        ctx.bezierCurveTo(
+          R * .86, R * .01,
+          R * .85, R * .06,
+          R * .78, R * .11
+        );
+        ctx.bezierCurveTo(
+          R * .71, R * .16,
+          R * .65, R * .17,
+          R * .61, R * .21
+        );
+        ctx.bezierCurveTo(
+          R * .67, R * .25,
+          R * .69, R * .32,
+          R * .64, R * .38
+        );
+        ctx.bezierCurveTo(
+          R * .57, R * .48,
+          R * .42, R * .51,
+          R * .27, R * .49
+        );
+        ctx.bezierCurveTo(
+          -R * .05, R * .58,
+          -R * .43, R * .56,
+          -R * .60, R * .43
+        );
+        ctx.closePath();
+      };
+
+      ctx.save();
+      traceHead();
+      ctx.clip();
+      const coat = ctx.createRadialGradient(
+        -R * .22, -R * .42, R * .04,
+        -R * .02, R * .04, R * 1.12
+      );
+      coat.addColorStop(0, breed.lightColor);
+      coat.addColorStop(.56, breed.bodyColor);
+      coat.addColorStop(1, breed.shadowColor);
+      ctx.fillStyle = coat;
+      ctx.fillRect(-R * 1.1, -R * 1.15, R * 2.2, R * 1.8);
+
+      if (breed.tabby || breed.hasStripes) {
+        ctx.strokeStyle = breed.stripeColor;
+        ctx.globalAlpha = .56;
+        ctx.lineCap = 'round';
+        ctx.lineWidth = R * .046;
+        ctx.beginPath();
+        ctx.moveTo(-R * .23, -R * .68);
+        ctx.quadraticCurveTo(-R * .05, -R * .55, R * .03, -R * .39);
+        ctx.moveTo(-R * .02, -R * .69);
+        ctx.quadraticCurveTo(R * .14, -R * .55, R * .18, -R * .40);
+        ctx.moveTo(-R * .62, -R * .20);
+        ctx.quadraticCurveTo(-R * .49, -R * .08, -R * .34, -R * .04);
+        ctx.moveTo(-R * .66, R * .01);
+        ctx.quadraticCurveTo(-R * .53, R * .08, -R * .42, R * .10);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      } else if (breed.hasPatches) {
+        ctx.fillStyle = '#d27a43';
+        ctx.globalAlpha = .90;
+        ctx.beginPath();
+        ctx.ellipse(-R * .28, -R * .33, R * .42, R * .49, -.24, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = '#3f3a39';
+        ctx.globalAlpha = .92;
+        ctx.beginPath();
+        ctx.ellipse(-R * .56, R * .05, R * .32, R * .48, .18, 0, TAU);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      } else if (breed.isPointColor) {
+        ctx.fillStyle = breed.pointColor;
+        ctx.globalAlpha = .70;
+        ctx.beginPath();
+        ctx.ellipse(R * .55, R * .02, R * .47, R * .49, -.17, 0, TAU);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      } else if (breed.hasMask) {
+        ctx.fillStyle = breed.bellyColor;
+        ctx.globalAlpha = .30;
+        ctx.beginPath();
+        ctx.ellipse(R * .44, R * .25, R * .43, R * .30, -.12, 0, TAU);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.fillStyle = breed.shadowColor;
+      ctx.globalAlpha = .11;
+      ctx.beginPath();
+      ctx.ellipse(-R * .56, R * .10, R * .25, R * .56, -.10, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      if (furPattern) {
+        ctx.globalAlpha = .14;
+        ctx.fillStyle = furPattern;
+        ctx.fillRect(-R * 1.1, -R * 1.15, R * 2.2, R * 1.8);
+        ctx.globalAlpha = 1;
+      }
+
+      const studioFur = getStudioFurPattern(ctx);
+      paintStudioFur(
+        ctx, studioFur, 42, -.27, .24, 'overlay',
+        { x: R * .02, y: -R * .12 }
+      );
+      ctx.restore();
+
+      ctx.save();
+      traceHead();
+      ctx.strokeStyle = 'rgba(38,35,33,.14)';
+      ctx.lineWidth = .75;
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.strokeStyle = 'rgba(255,255,255,.17)';
+      ctx.lineWidth = R * .055;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-R * .42, -R * .50);
+      ctx.quadraticCurveTo(-R * .16, -R * .64, R * .02, -R * .57);
+      ctx.quadraticCurveTo(R * .20, -R * .49, R * .34, -R * .34);
+      ctx.stroke();
+
+      ctx.fillStyle = breed.isPointColor ? breed.pointColor : breed.bellyColor;
+      ctx.globalAlpha = breed.isPointColor ? .40 : .46;
+      ctx.beginPath();
+      ctx.ellipse(R * .51, R * .15, R * .29, R * .18, -.08, 0, TAU);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(R * .34, R * .39, R * .19, R * .075, -.06, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      ctx.fillStyle = breed.isPointColor ? 'rgba(24,19,17,.16)' : 'rgba(93,73,65,.10)';
+      ctx.beginPath();
+      ctx.ellipse(R * .13, -R * .20, R * .31, R * .24, -.08, 0, TAU);
+      ctx.fill();
+
+      this._drawGemEye(
+        ctx, R * .17, -R * .21,
+        R * .245, R * .184,
+        expression.angry ? -.28 : -.10,
+        breed.eyeColor, dna.browWeight * .45,
+        expression.gazeX, expression.gazeY, false, expression
+      );
+
+      ctx.strokeStyle = expression.angry ? 'rgba(55,40,37,.52)' : 'rgba(55,43,39,.24)';
+      ctx.lineWidth = R * .018;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-R * .02, -R * .43);
+      ctx.quadraticCurveTo(R * .13, -R * .48, R * .29, -R * .34);
+      ctx.stroke();
+
+      ctx.fillStyle = breed.noseColor;
+      ctx.beginPath();
+      ctx.moveTo(noseX - R * .105, noseY - R * .018);
+      ctx.quadraticCurveTo(noseX - R * .015, noseY - R * .072, noseX + R * .055, noseY - R * .028);
+      ctx.quadraticCurveTo(noseX + R * .058, noseY + R * .052, noseX - R * .012, noseY + R * .078);
+      ctx.quadraticCurveTo(noseX - R * .083, noseY + R * .058, noseX - R * .105, noseY - R * .018);
+      ctx.fill();
+
+      ctx.fillStyle = 'rgba(29,24,23,.26)';
+      ctx.beginPath();
+      ctx.ellipse(noseX + R * .012, noseY + R * .015, R * .030, R * .012, .16, 0, TAU);
+      ctx.fill();
+
+      if (expression.lick) {
+        ctx.fillStyle = '#c87a78';
+        ctx.beginPath();
+        ctx.ellipse(R * .59, R * .33, R * .072, R * .112, -.38, 0, TAU);
+        ctx.fill();
+      }
+
+      ctx.strokeStyle = 'rgba(58,40,37,.76)';
+      ctx.lineWidth = R * .023;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(noseX - R * .004, noseY + R * .075);
+      ctx.quadraticCurveTo(R * .62, R * .20, R * .48, R * .22);
+      ctx.moveTo(R * .56, R * .245);
+      ctx.quadraticCurveTo(R * .62, R * .29, R * .50, R * .30);
+      ctx.moveTo(R * .38, R * .43);
+      ctx.quadraticCurveTo(R * .45, R * .46, R * .53, R * .41);
+      ctx.stroke();
+
+      ctx.fillStyle = 'rgba(55,39,36,.22)';
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(
+          R * (.47 + i * .047),
+          R * (.15 + (i % 2) * .035),
+          R * .008,
+          0, TAU
+        );
+        ctx.fill();
+      }
+
+      ctx.strokeStyle = breed.id === 'white' ? '#938879' : 'rgba(255,252,234,.82)';
+      ctx.lineWidth = R * .021;
+      ctx.beginPath();
+      ctx.moveTo(R * .52, R * .10);
+      ctx.quadraticCurveTo(R * .82, R * .07, R * 1.17, R * .12);
+      ctx.moveTo(R * .49, R * .17);
+      ctx.quadraticCurveTo(R * .80, R * .18, R * 1.12, R * .28);
+      ctx.moveTo(R * .46, R * .24);
+      ctx.quadraticCurveTo(R * .70, R * .31, R * .96, R * .42);
+      ctx.stroke();
+
+      this._drawProfileHat(ctx, R, expression);
+      ctx.restore();
+    }
+
+    _drawProfileHat(ctx, R, expression) {
+      if (!this.hat || this.hat === 'none') return;
+      ctx.save();
+      ctx.rotate(expression.angry ? -.025 : 0);
+
+      if (this.hat === 'bell') {
+        ctx.strokeStyle = '#b84049';
+        ctx.lineWidth = R * .075;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(-R * .43, R * .42);
+        ctx.quadraticCurveTo(-R * .02, R * .55, R * .31, R * .43);
+        ctx.stroke();
+        ctx.fillStyle = '#e4bd4b';
+        ctx.beginPath();
+        ctx.arc(R * .08, R * .56, R * .092, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(90,65,26,.34)';
+        ctx.beginPath();
+        ctx.arc(R * .08, R * .57, R * .035, 0, TAU);
+        ctx.fill();
+      } else if (this.hat === 'bow') {
+        ctx.translate(-R * .34, -R * .73);
+        ctx.rotate(-.16);
+        ctx.fillStyle = '#f85f7d';
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-R * .24, -R * .13);
+        ctx.lineTo(-R * .22, R * .15);
+        ctx.closePath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(R * .24, -R * .13);
+        ctx.lineTo(R * .22, R * .15);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(0, 0, R * .082, 0, TAU);
+        ctx.fillStyle = '#ff849a';
+        ctx.fill();
+      } else if (this.hat === 'party') {
+        ctx.translate(-R * .02, -R * .77);
+        ctx.fillStyle = '#2bc46d';
+        ctx.beginPath();
+        ctx.moveTo(-R * .22, R * .02);
+        ctx.quadraticCurveTo(-R * .05, -R * .35, R * .03, -R * .54);
+        ctx.quadraticCurveTo(R * .10, -R * .31, R * .23, R * .02);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#f05a66';
+        ctx.beginPath();
+        ctx.arc(R * .03, -R * .55, R * .065, 0, TAU);
+        ctx.fill();
+      } else if (this.hat === 'wizard') {
+        ctx.translate(-R * .02, -R * .74);
+        ctx.fillStyle = '#4752d8';
+        ctx.beginPath();
+        ctx.moveTo(-R * .21, R * .03);
+        ctx.quadraticCurveTo(-R * .10, -R * .28, R * .01, -R * .68);
+        ctx.quadraticCurveTo(R * .14, -R * .30, R * .23, R * .03);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#e8b947';
+        ctx.lineWidth = R * .045;
+        ctx.beginPath();
+        ctx.ellipse(0, R * .03, R * .31, R * .065, 0, 0, TAU);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     _drawHead(ctx, hx, hy, R, furPattern) {
       const breed = this.breed;
       const dna = this.dna;
@@ -1005,7 +1794,7 @@
       ctx.translate(hx, hy);
       // 头部微角度注视 + 观鸟嗑牙震颤
       const chatterOffset = this.state === 'chattering' ? Math.sin(this.chatterPhase * 3) * 0.08 : 0;
-      ctx.rotate(this.headTilt + gazeY * 0.12 + chatterOffset);
+      ctx.rotate(this.headTilt + gazeY * .12 + chatterOffset);
 
       const cheekW = R * 1.04 * dna.skullW * lerp(0.93, 1.13, clamp((this.bcs - 2) / 7, 0, 1)) * (1 + this.fluff * 0.14);
       const muzzleShift = turn * R * 0.50;
@@ -1221,7 +2010,6 @@
       });
       ctx.stroke();
 
-      // 帽子
       this.drawHat(ctx, crownY, R);
 
       ctx.restore();
@@ -1280,7 +2068,7 @@
       }
     }
 
-    drawSpeechBubble(ctx, bubbleBottomY) {
+    drawSpeechBubble(ctx, bubbleBottomY, upright = false) {
       ctx.save();
       ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
       const textMetrics = ctx.measureText(this.bubbleText);
@@ -1291,9 +2079,9 @@
       const bx = -bw / 2;
       const by = bubbleBottomY - bh;
 
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
-      ctx.shadowBlur = 8;
-      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = 'rgba(54, 43, 32, 0.18)';
+      ctx.shadowBlur = 4;
+      ctx.fillStyle = '#fffdf3';
       ctx.beginPath();
       ctx.roundRect(bx, by, bw, bh, [8]);
       ctx.fill();
@@ -1307,11 +2095,16 @@
       ctx.fill();
 
       ctx.shadowBlur = 0;
-      this._drawUprightText(ctx, () => ctx.fillText(this.bubbleText, 0, by + bh / 2));
+      ctx.fillStyle = '#293c2e';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      const drawText = () => ctx.fillText(this.bubbleText, 0, by + bh / 2);
+      if (upright) drawText();
+      else this._drawUprightText(ctx, drawText);
       ctx.restore();
     }
 
-    drawIntentBadge(ctx, badgeY) {
+    drawIntentBadge(ctx, badgeY, upright = false) {
       ctx.save();
       ctx.font = 'bold 9px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
       const label = `${this.intentIcon} ${this.intentLabel || ''}`;
@@ -1333,7 +2126,11 @@
       ctx.stroke();
 
       ctx.fillStyle = '#f1f2f6';
-      this._drawUprightText(ctx, () => ctx.fillText(label, 0, by + bh / 2 + 0.5));
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      const drawText = () => ctx.fillText(label, 0, by + bh / 2 + 0.5);
+      if (upright) drawText();
+      else this._drawUprightText(ctx, drawText);
       ctx.restore();
     }
 
@@ -1343,7 +2140,7 @@
     render(ctx, width, height, options = {}) {
       const dt = this._lastDt || CAT_NOMINAL_DT;
       const quality = currentRenderQuality();
-      const lowQuality = quality === 'low';
+      const lowQuality = !options.profile && quality === 'low';
       // 低画质下跳过微毛发纹理与部分渐变，保留体型、花纹与表情辨识度
       const furPattern = lowQuality ? null : getFurPattern(ctx);
       // 渲染设计坐标系的基准身长约 96px，而物理半径仅 22~26px（直径 44~52px）。
@@ -1356,7 +2153,7 @@
       const bcsNorm = clamp((this.bcs - 2) / 7, 0, 1);
 
       ctx.save();
-      ctx.translate(this.x, this.y);
+      ctx.translate(this.x, this.visualFootY);
       ctx.scale(this.facing * scaleFactor, scaleFactor);
       // 抓取"仅含平移+镜像缩放"的变换，供文字正向绘制使用（姿态旋转发生在之后，不进来）
       this._textCTM = ctx.getTransform ? ctx.getTransform() : null;
@@ -1419,14 +2216,14 @@
       const scapCrestTarget = isWalk ? Math.max(gFL.cush, gFR.cush) * 4.0 : 0;
       const hipRoll = isWalk ? (gBL.cush - gBR.cush) * 2.0 : (isCrouch ? Math.sin(this.buttWiggle) * 4.2 : 0);
 
-      const loafBreatheY = isLoaf ? Math.sin(this.loafBreathe) * 1.8 : 0;
+      const breatheY = Math.sin(this.loafBreathe) * (isLoaf ? 1.8 : options.profile ? 1.35 : 0);
       const tHipX = -bodyLen * 0.52;
       const tShX = bodyLen * 0.48;
-      const tHipY = -(isLoaf ? 20 : (isCrouch ? legH * 0.86 : legH * 1.05)) + hipRoll + loafBreatheY;
-      const tShY = -(isLoaf ? 20 : (isCrouch ? legH * 0.56 : legH * 0.93)) + frontCushion + loafBreatheY;
+      const tHipY = -(isLoaf ? 20 : (isCrouch ? legH * 0.86 : legH * 1.05)) + hipRoll + breatheY;
+      const tShY = -(isLoaf ? 20 : (isCrouch ? legH * 0.56 : legH * 0.93)) + frontCushion + breatheY;
       const tMidY = (tHipY + tShY) * 0.5 + (isLoaf ? 1 : (isCrouch ? 8 : 5.5)) + spineStretch * 0.25;
       const tNeckX = tShX + lerp(16, 22, age) * (isLoaf ? 0.6 : 1.0);
-      const tNeckY = -(isLoaf ? 34 : (isCrouch ? legH * 0.58 + 13 : legH * 0.96 + lerp(18, 25, age))) + frontCushion * 0.22 + loafBreatheY;
+      const tNeckY = -(isLoaf ? 34 : (isCrouch ? legH * 0.58 + 13 : legH * 0.96 + lerp(18, 25, age))) + frontCushion * 0.22 + breatheY;
 
       const sm = this._smooth;
       if (!sm.initialized) {
@@ -1456,13 +2253,28 @@
       const s4 = { x: sh.x,                          y: sh.y + Math.sin(this.walkCycle * 2 - 2.2) * waveAmp * 0.7 };
 
       // 4. 尾巴绘制 (锚定在十字部 s0)
-      if (!this.inBox) {
+      if (options.profile) {
+        const x = s0.x + 5;
+        const y = s0.y - 3;
+        const tip = Math.sin(this.loafBreathe * .8) * 3;
+        ctx.save();
+        ctx.fillStyle = breed.isPointColor ? breed.pointColor : breed.bodyColor;
+        ctx.beginPath();
+        ctx.moveTo(x + 3, y - 5);
+        ctx.bezierCurveTo(x - 19, y - 3, x - 33, y + 11, x - 44, y + 2);
+        ctx.bezierCurveTo(x - 53, y - 4, x - 52, y - 14 + tip, x - 56, y - 14 + tip);
+        ctx.bezierCurveTo(x - 62, y - 13 + tip, x - 58, y - 2, x - 51, y + 5);
+        ctx.bezierCurveTo(x - 42, y + 18, x - 24, y + 14, x + 3, y + 5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      } else if (!this.inBox) {
         this._drawTail(ctx, { x: s0.x + 2, y: s0.y - 3 }, hipRoll, this.state === 'climbing');
       }
 
       // 5. 远端四肢绘制 (母鸡蹲时收于体底，跳过绘制)
       let legBL, legFL, legBR, legFR;
-      if (!isLoaf && !this.inBox) {
+      if (!options.profile && !isLoaf && !this.inBox) {
         const stride = (isTrot ? 35 : 32) * lerp(0.68, 1.0, age);
         const lift = (isTrot ? 15.5 : 12.0) * lerp(0.74, 1.0, age);
         const hindCenter = -baseBodyLen * 0.52;
@@ -1480,13 +2292,16 @@
         legFR = this._dampLeg(3, isClimb
           ? this._computeClimbLeg({ x: sh.x + 1, y: sh.y + 3 }, 0, frontCenter + 2, legScale)
           : this._computeFrontLeg({ x: sh.x + 1, y: sh.y + 3 }, gFR, frontCenter + 2, stride, lift, legScale, isWalk), dt);
-
+      }
+      if (legBL) {
         this._drawLegMesh(ctx, legBL, true, true, mid.y);
         this._drawLegMesh(ctx, legFL, false, true, mid.y);
       }
 
       // 6. 3 体积解剖躯干 (受 5 节脊椎 + WSAVA 评分 + 原始袋下垂联合驱动)
-      if (!this.inBox) {
+      if (options.profile) {
+        this._drawProfileBody(ctx, hip, sh, neckTop, legScale, furPattern);
+      } else if (!this.inBox) {
         const L = Math.max(55, sh.x - hip.x);
         const furPad = fluff * 4.8;
         const ribDepth = lerp(15.5, 22.0, age) * lerp(0.84, 1.24, bcsNorm) + furPad;
@@ -1542,8 +2357,10 @@
         }
 
         if (furPattern) {
+          ctx.globalAlpha = options.profile ? .42 : 1;
           ctx.fillStyle = furPattern;
           ctx.fillRect(-130, -165, 260, 175);
+          ctx.globalAlpha = 1;
         }
 
         if (!lowQuality) {
@@ -1551,6 +2368,7 @@
           const by = mid.y + 22;
           ctx.save();
           ctx.translate(bx, by);
+          if (options.profile) ctx.globalAlpha = .47;
           ctx.fillStyle = this._cachedGradient('belly_' + breed.bellyColor, ctx, (c) => {
             const grad = c.createRadialGradient(0, 0, 4, 0, 0, 44);
             grad.addColorStop(0, breed.bellyColor);
@@ -1623,19 +2441,32 @@
       }
 
       // 8. 近端四肢或母鸡蹲揣手小肉垫
-      if (!isLoaf && !this.inBox) {
-        this._drawLegMesh(ctx, legBR, true, false, mid.y);
-        this._drawLegMesh(ctx, legFR, false, false, mid.y);
-      } else if (isLoaf && !this.inBox) {
-        ctx.fillStyle = breed.socks ? breed.bellyColor : (breed.isPointColor ? breed.pointColor : breed.lightColor);
-        ctx.beginPath();
-        ctx.ellipse(sh.x + 6, -3, 11, 5.5, 0.08, 0, TAU);
-        ctx.fill();
+      if (!options.profile) {
+        if (legBR) {
+          this._drawLegMesh(ctx, legBR, true, false, mid.y);
+          this._drawLegMesh(ctx, legFR, false, false, mid.y);
+        } else if (isLoaf && !this.inBox) {
+          ctx.fillStyle = breed.socks ? breed.bellyColor : (breed.isPointColor ? breed.pointColor : breed.lightColor);
+          ctx.beginPath();
+          ctx.ellipse(sh.x + 6, -3, 11, 5.5, 0.08, 0, TAU);
+          ctx.fill();
+        }
       }
 
       // 9. 3/4 雕塑微观猫头与面部
       const bodyHeadR = lerp(34.5, 29.5, age); // 头身比放大，幼态可爱
-      this._drawHead(ctx, neckTop.x + 9, neckTop.y - 3 - lerp(3, 0, age), bodyHeadR, furPattern);
+      const headX = neckTop.x + 9;
+      const headY = neckTop.y - 3 - lerp(3, 0, age);
+      if (options.profile) {
+        this._drawProfileHead(ctx, headX - 2, headY + 1, bodyHeadR * 1.05, furPattern, options.profile);
+      } else {
+        this._drawHead(ctx, headX, headY, bodyHeadR, furPattern);
+      }
+
+      if (options.suppressIndividualLabels) {
+        ctx.restore();
+        return;
+      }
 
       // 10. 名字标签（正向绘制：抵消 facing 镜像与爬树旋转）
       this._drawUprightText(ctx, () => {
@@ -1817,6 +2648,7 @@
       }
 
       // 6. 状态机与智能决策决策推进
+      this._mochiLanding = (this._mochiLanding || 0) * Math.pow(.78, frameStep);
       this.runStateMachine(width, height, sceneContext);
 
       // 7. 物理学与边界应用
@@ -1845,39 +2677,60 @@
           // 纵向速度极限解禁 (高达 16px/frame，赋予猫咪高达 450px+ 的弹跳腾空力)
           this.vy = MathUtils.clamp(this.vy, -16.0, 16.0);
 
+          const startX = this.x;
+          const startY = this.y;
           this.x += this.vx * frameStep;
           this.y += this.vy * frameStep;
 
-          // 检查墙壁跳台、猫爬架各层高台、空中悬索桥与全景吊床
-          let landedOnPerch = false;
-          if (this.vy >= -0.5 && sceneContext?.furniture) {
+          // 复用落脚面缓冲区，单次扫掠求最先穿越的单向表面或地面
+          const landingSurfaces = this._landingSurfaces || (this._landingSurfaces = []);
+          const landingSurfaceHosts = this._landingSurfaceHosts ||
+            (this._landingSurfaceHosts = new WeakMap());
+          landingSurfaces.length = 0;
+          if (sceneContext?.furniture) {
             for (let f of sceneContext.furniture) {
               const surfaces = f.getPerchSurfaces ? f.getPerchSurfaces() : (
                 f.type === 'perch' ? [{ id: f, x: f.x, y: f.y, w: f.w, type: 'perch' }] :
                 (f.type === 'cattree' && f.tiers ? f.tiers.map(t => ({ id: t, x: f.x + t.xOffset, y: f.y + t.yOffset, w: t.w, type: 'cattree', tier: t, tree: f })) : [])
               );
-
-              for (let s of surfaces) {
-                const halfW = (s.w || 60) / 2;
-                const catFeetY = this.y + this.radius;
-                if (Math.abs(this.x - s.x) <= halfW + 6) {
-                  if (catFeetY >= s.y - 14 && catFeetY <= s.y + Math.max(16, this.vy + 6)) {
-                    this.y = s.y - this.radius;
-                    this.vy = 0;
-                    this.vx *= 0.82;
-                    this.perchedTier = s.id;
-                    // 同步桥面落脚状态：只有真正落在悬索桥上才记为 onBridge（值为桥对象）
-                    this.onBridge = (f.type === 'bridge') ? f : false;
-                    landedOnPerch = true;
-                    if (this.state === 'jumping' || this.state === 'aerial_pounce_drop') {
-                      this.state = 'idle';
-                      if (soundEngine?.playWoodThud && Math.random() < 0.4) soundEngine.playWoodThud();
-                    }
-                    break;
-                  }
+              if (Array.isArray(surfaces)) {
+                for (let s of surfaces) {
+                  landingSurfaces.push(s);
+                  landingSurfaceHosts.set(s, f);
                 }
               }
-              if (landedOnPerch) break;
+            }
+          }
+
+          const landing = LandingResolver.findFirst({
+            startX,
+            startY,
+            endX: this.x,
+            endY: this.y,
+            radius: this.radius,
+            surfaces: landingSurfaces,
+            floorY: floor + this.radius,
+            isContinuingSurface: surface =>
+              surface.id === this.perchedTier ||
+              (this.onBridge && surface.id === this.onBridge)
+          });
+
+          if (landing && this.vy > 2.6) this._mochiLanding = Math.min(1, this.vy / 10);
+          let landedOnPerch = false;
+          if (landing?.kind === 'surface') {
+            const contactX = landing.startedInContact ? this.x : landing.x;
+            this.x = contactX;
+            this.y = LandingResolver.getSurfaceYAt(landing.surface, contactX) - this.radius;
+            this.vy = 0;
+            this.vx *= 0.82;
+            this.perchedTier = landing.surface.id;
+            // 同步桥面落脚状态：只有真正落在悬索桥上才记为 onBridge（值为桥对象）
+            const landingHost = landingSurfaceHosts.get(landing.surface);
+            this.onBridge = (landingHost && landingHost.type === 'bridge') ? landingHost : false;
+            landedOnPerch = true;
+            if (this.state === 'jumping' || this.state === 'aerial_pounce_drop') {
+              this.state = 'idle';
+              if (soundEngine?.playWoodThud && Math.random() < 0.4) soundEngine.playWoodThud();
             }
           }
 
@@ -1886,10 +2739,9 @@
             this.onBridge = false;
           }
 
-          // 落地与边界碰撞
-          if (this.y > floor) {
-            this.y = floor;
-            this.vy = -this.vy * 0.35;
+          if (landing?.kind === 'floor') {
+            this.y = landing.y;
+            this.vy = this.vy > 0 ? -this.vy * 0.35 : 0;
             if (Math.abs(this.vy) < 0.2) this.vy = 0;
             if (this.state === 'pouncing' || this.state === 'jumping' || this.state === 'aerial_pounce_drop') {
               this.state = 'idle';
@@ -2784,6 +3636,30 @@
       this.stateTimer = 100;
     }
 
+    drawPortrait(ctx, size) {
+      this.renderChibiLoaf(ctx, size, size, { portrait: true, useSpriteCache: true, suppressIndividualLabels: true });
+    }
+
+    containsVisualPoint(x, y, style) {
+      const r = this.radius;
+      const dx = ((x - this.x) / r) * this.facing;
+      const dy = (y - this.visualFootY) / r;
+      if (this.inBox && y > this.inBox.y - this.inBox.h / 2 + 2) return false;
+      if (style === 'procedural') {
+        const torso = ((dx + .17) / 1.16) ** 2 + ((dy + .69) / .8) ** 2;
+        const head = ((dx - 1.04) / .85) ** 2 + ((dy + 1.52) / .86) ** 2;
+        return torso <= 1 || head <= 1;
+      }
+      const { sx, sy, angle } = mochiPose(this);
+      const c = Math.cos(angle);
+      const sn = Math.sin(angle);
+      const localX = (dx * c + dy * sn) / sx;
+      const localY = (-dx * sn + dy * c) / sy;
+      const body = (localX / 1.13) ** 2 + ((localY + .83) / .85) ** 2;
+      const ear = ((Math.abs(localX) - .66) / .23) ** 2 + ((localY + 1.49) / .37) ** 2;
+      return body <= 1 || ear <= 1;
+    }
+
     draw(ctx, width, height, options = {}) {
       const globalStyle = (typeof window !== 'undefined' && window.CyberMeow && window.CyberMeow.catRenderStyle);
       const style = options.style || this.renderStyle || globalStyle;
@@ -2793,309 +3669,155 @@
       return this.render(ctx, width, height, options);
     }
 
-    // ============================================================================
-    // 6.5. Q 萌猫团子渲染管线 (Chibi Mochi Cat — 宏观沙盒常态 60 FPS 极速渲染)
-    // 支持离屏烘焙加速 (ChibiBakeCache)、立体灵动双眼系统与空间聚类标签折叠
-    // ============================================================================
     renderChibiLoaf(ctx, width, height, options = {}) {
-      const breed = this.breed;
-      const R = this.radius || 22;
-      const isWalk = (this.state === 'walk' || this.state === 'walking' || this.state === 'running' ||
-                      this.state === 'trot' || this.state === 'zoomies' || this.state === 'aerial_patrol_walk');
-      const isLoaf = (this.state === 'loaf');
-      const isSleeping = (this.state === 'sleeping');
-      const isCrouch = (this.state === 'crouch' || this.state === 'stalking' || this.state === 'stealth_stalk' ||
-                        this.state === 'stealth_freeze' || this.state === 'aerial_pounce_aim');
-
+      const { breed } = this;
+      const portrait = options.portrait;
+      const r = portrait ? width * .28 : this.radius;
+      const { sx, sy, angle, phase, resting, brisk, airborne } = portrait
+        ? { sx: 1, sy: 1, angle: 0, phase: 0, resting: false, brisk: false, airborne: false }
+        : mochiPose(this);
+      const boxed = !portrait && this.inBox;
+      const grabbed = !portrait && this.isGrabbed;
       ctx.save();
-      ctx.translate(this.x, this.y);
-      ctx.scale(this.facing, 1);
-      this._textCTM = ctx.getTransform ? ctx.getTransform() : null;
 
-      // 动态 Q 弹呼吸与形变 (Squash & Stretch)
-      let sx = 1.0;
-      let sy = 1.0;
-      let bounceY = 0;
-      let rot = 0;
+      if (boxed) {
+        ctx.beginPath();
+        const rimY = boxed.y - boxed.h / 2 + 1;
+        ctx.rect(this.x - r * 2, rimY - r * 4, r * 4, r * 4);
+        ctx.clip();
+      }
+      ctx.translate(portrait ? width * .53 : this.x, portrait ? height * .83 : this.visualFootY);
+      ctx.scale(portrait ? 1 : this.facing, 1);
+      if (!options.suppressIndividualLabels) {
+        this._textCTM = ctx.getTransform ? ctx.getTransform() : null;
+      }
+      ctx.save();
+      ctx.scale(r, r);
 
-      if (this.isGrabbed || this.state === 'grabbed') {
-        sx = 0.72;
-        sy = clamp(this.grabStretch || 1.35, 1.1, 1.8);
-      } else if (this.state === 'jumping' || this.state === 'pouncing' || this.state === 'aerial_pounce_drop') {
-        rot = Math.atan2(this.vy, Math.abs(this.vx) + 0.1) * 0.35;
-        sx = 1.22;
-        sy = 0.82;
-      } else if (isWalk) {
-        bounceY = Math.sin((this.walkCycle || 0) * 2) * 2.2;
-        sx = 1.0 + Math.sin((this.walkCycle || 0) * 2) * 0.08;
-        sy = 1.0 - Math.sin((this.walkCycle || 0) * 2) * 0.08;
-      } else if (isLoaf || isSleeping) {
-        const breathe = Math.sin(Date.now() * 0.004 + (this.x % 10)) * 1.5;
-        sx = 1.15;
-        sy = 0.85;
-        bounceY = breathe;
-      } else if (isCrouch) {
-        sx = 1.25;
-        sy = 0.75;
-        bounceY = 3;
+      if (!portrait && !grabbed && !airborne && !boxed && this.state !== 'climbing') {
+        ctx.fillStyle = 'rgba(57, 41, 33, .16)';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, .96, .12, 0, 0, TAU);
+        ctx.fill();
       }
 
-      ctx.rotate(rot);
+      ctx.rotate(angle);
       ctx.scale(sx, sy);
 
-      // 1. 软萌地面阴影
-      if (!this.isGrabbed && this.state !== 'jumping' && this.state !== 'aerial_pounce_drop') {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+      if (!boxed) {
+        const wave = portrait ? .02 : Math.sin(Date.now() * .007 + this.x * .08) * .12;
+        ctx.lineCap = 'round';
         ctx.beginPath();
-        ctx.ellipse(0, 4, R * 1.15, 6, 0, 0, TAU);
-        ctx.fill();
+        ctx.moveTo(-.8, -.49);
+        ctx.bezierCurveTo(-1.18, -.43, -1.53 - wave, -.62, -1.46 + wave, -.91 - wave);
+        ctx.strokeStyle = MOCHI_INK;
+        ctx.lineWidth = .26;
+        ctx.stroke();
+        ctx.strokeStyle = breed.isPointColor ? breed.pointColor : breed.bodyColor;
+        ctx.lineWidth = .18;
+        ctx.stroke();
       }
 
-      // 2. 摇摆小尾巴 (动态逐帧贝塞尔摆动)
-      const tailWiggle = Math.sin(Date.now() * 0.007 + this.x) * 0.35;
-      ctx.strokeStyle = breed.stripeColor || breed.shadowColor || breed.bodyColor;
-      ctx.lineWidth = 5.5;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(-R * 0.75, -R * 0.6 + bounceY);
-      ctx.quadraticCurveTo(-R * 1.5, -R * 1.1 + tailWiggle * 8 + bounceY, -R * 1.3, -R * 1.6 + tailWiggle * 14 + bounceY);
-      ctx.stroke();
-
-      // 3. 躯体底板绘制：支持离屏 Sprite 缓存烘焙加速（省 80% 路径与样式切换）
-      const baked = (options.useSpriteCache && typeof ChibiBakeCache !== 'undefined')
-        ? ChibiBakeCache.get(breed.id) : null;
-
-      if (baked && baked.canvas) {
-        // --- 离屏缓存极速 Blit 管线 ---
-        const drawSize = R * 2.8;
-        ctx.drawImage(baked.canvas, -drawSize * 0.48, -drawSize * 0.95 + bounceY, drawSize, drawSize);
+      const baked = options.useSpriteCache ? ChibiBakeCache.get(breed.id) : null;
+      if (baked?.breed === breed && typeof ctx.drawImage === 'function') {
+        const size = baked.size / baked.r;
+        ctx.drawImage(baked.canvas, -baked.origin.x / baked.r, -baked.origin.y / baked.r, size, size);
       } else {
-        // --- 矢量实时纯原生管线 ---
-        // 3.1 软糯大汤圆身体 (Mochi Loaf Body)
-        ctx.fillStyle = breed.bodyColor;
-        ctx.beginPath();
-        ctx.ellipse(0, -R * 0.8 + bounceY, R * 1.18, R * 0.92, 0, 0, TAU);
-        ctx.fill();
-
-        // 3.2 品种专属花纹 (Tabby 条纹 / Calico 斑块)
-        if (breed.hasStripes) {
-          ctx.strokeStyle = breed.stripeColor || '#b35b14';
-          ctx.lineWidth = 2.5;
-          ctx.lineCap = 'round';
-          [-0.3, 0.0, 0.3].forEach(off => {
-            ctx.beginPath();
-            ctx.arc(R * off, -R * 1.3 + bounceY, R * 0.45, Math.PI * 0.2, Math.PI * 0.8);
-            ctx.stroke();
-          });
-        } else if (breed.hasPatches) {
-          ctx.fillStyle = '#e58e35';
-          ctx.beginPath();
-          ctx.ellipse(-R * 0.4, -R * 1.1 + bounceY, R * 0.35, R * 0.25, 0.4, 0, TAU);
-          ctx.fill();
-          ctx.fillStyle = '#273240';
-          ctx.beginPath();
-          ctx.ellipse(R * 0.3, -R * 0.8 + bounceY, R * 0.3, R * 0.2, -0.3, 0, TAU);
-          ctx.fill();
-        }
-
-        // 3.3 软乎乎白肚皮 / 浅色胸脯
-        ctx.fillStyle = breed.bellyColor;
-        ctx.beginPath();
-        ctx.ellipse(R * 0.15, -R * 0.55 + bounceY, R * 0.78, R * 0.52, 0, 0, TAU);
-        ctx.fill();
-
-        // 3.4 软萌小肉垫爪爪
-        if (!isLoaf && !isSleeping) {
-          ctx.fillStyle = breed.socks ? breed.bellyColor : (breed.lightColor || breed.bodyColor);
-          ctx.beginPath();
-          ctx.arc(R * 0.45, -2 + bounceY, 4.5, 0, TAU);
-          ctx.arc(-R * 0.1, -2 + bounceY, 4.5, 0, TAU);
-          ctx.fill();
-        }
-
-        // 3.5 圆萌立体小耳朵
-        const earSpread = R * 0.55;
-        const earY = -R * 1.45 + bounceY;
-        const drawEar = (ex, ey) => {
-          ctx.fillStyle = breed.isPointColor ? breed.pointColor : breed.bodyColor;
-          ctx.beginPath();
-          ctx.moveTo(ex - 7, ey + 4);
-          ctx.lineTo(ex, ey - 12);
-          ctx.lineTo(ex + 7, ey + 4);
-          ctx.closePath();
-          ctx.fill();
-
-          ctx.fillStyle = breed.earColor || '#eea0a0';
-          ctx.beginPath();
-          ctx.moveTo(ex - 4, ey + 3);
-          ctx.lineTo(ex, ey - 7);
-          ctx.lineTo(ex + 4, ey + 3);
-          ctx.closePath();
-          ctx.fill();
-        };
-        drawEar(-earSpread, earY);
-        drawEar(R * 0.15, earY);
-
-        // 3.6 暹罗猫面部重点色面罩
-        if (breed.isPointColor) {
-          ctx.fillStyle = breed.pointColor;
-          ctx.beginPath();
-          ctx.ellipse(R * 0.42, -R * 0.75 + bounceY, R * 0.45, R * 0.38, 0, 0, TAU);
-          ctx.fill();
-        }
+        drawMochiBase(ctx, breed);
       }
 
-      // 4. 灵动立体双眼系统 (Dual Anime Eyes: 3/4 透视立体双眼 + 异瞳 + 追视 + 状态表情)
-      const eyeFarX = R * 0.14;   // 远眼（内侧，带透视微缩）
-      const eyeNearX = R * 0.46;  // 近眼（外侧，水润饱满）
-      const eyeY = -R * 0.82 + bounceY;
-      const eyeFarR = 3.9;
-      const eyeNearR = 4.7;
-
-      // 视线平滑追踪解算 (Look-At)
-      const gazeX = (options.eyeTracking !== false && this._smooth) ? (this._smooth.gazeX || 0) : 0;
-      const gazeY = (options.eyeTracking !== false && this._smooth) ? (this._smooth.gazeY || 0) : 0;
-      const lookDx = clamp(gazeX * 1.5, -1.6, 1.6);
-      const lookDy = clamp(gazeY * 1.2, -1.3, 1.3);
-      const blinkScaleY = (this._blinkAmt > 0) ? Math.max(0.08, 1 - this._blinkAmt) : 1.0;
-
-      // 双眼颜色映射：支持异瞳（如白猫鸳鸯眼：左眼天蓝，右眼金珀）
-      const farEyeColor = breed.eyeColor || '#2ed573';
-      const nearEyeColor = (breed.id === 'white' && breed.eyeRightColor) ? breed.eyeRightColor : breed.eyeColor;
-
-      if (isSleeping || isLoaf || blinkScaleY < 0.22) {
-        // --- 表情A: 睡眠/揣手手幸福微笑眯眼 (⌒   ⌒) ---
-        ctx.strokeStyle = '#2d3436';
-        ctx.lineWidth = 1.8;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.arc(eyeFarX, eyeY + 1.2, 3.6, Math.PI * 1.1, Math.PI * 1.9);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(eyeNearX, eyeY + 1.2, 4.4, Math.PI * 1.1, Math.PI * 1.9);
-        ctx.stroke();
-      } else if (this.state === 'bridge_duel' || this.state === 'belly_trap') {
-        // --- 表情B: 战斗/警惕凶萌眯眼 (>   <) ---
-        ctx.strokeStyle = '#2d3436';
-        ctx.lineWidth = 2.0;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(eyeFarX - 3.4, eyeY - 2.5);
-        ctx.lineTo(eyeFarX + 2.4, eyeY);
-        ctx.lineTo(eyeFarX - 3.4, eyeY + 2.5);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(eyeNearX - 3.6, eyeY - 2.6);
-        ctx.lineTo(eyeNearX + 2.8, eyeY);
-        ctx.lineTo(eyeNearX - 3.6, eyeY + 2.6);
-        ctx.stroke();
-      } else if (this.isGrabbed || this.state === 'grabbed') {
-        // --- 表情C: 被拎起受惊震撼大呆眼 (O   O) ---
-        const drawShockEye = (ex, ey, r, col) => {
-          ctx.fillStyle = '#ffffff';
+      if (!boxed) {
+        ctx.fillStyle = breed.isPointColor ? breed.pointColor : (breed.socks ? breed.bellyColor : breed.lightColor);
+        ctx.strokeStyle = MOCHI_INK;
+        ctx.lineWidth = .038;
+        for (const paw of MOCHI_PAWS) {
+          const step = brisk ? Math.sin(phase + (paw < 0 ? 0 : Math.PI)) : 0;
+          const y = resting ? -.15 : -.11 - Math.max(0, step) * .07;
           ctx.beginPath();
-          ctx.arc(ex, ey, r, 0, TAU);
+          ctx.ellipse(paw + step * .10, y, .22, .105, step * .15, 0, TAU);
           ctx.fill();
-          ctx.strokeStyle = '#2d3436';
-          ctx.lineWidth = 1.5;
           ctx.stroke();
-
-          ctx.fillStyle = col;
-          ctx.beginPath();
-          ctx.arc(ex + lookDx * 0.5, ey + lookDy * 0.5, r * 0.55, 0, TAU);
-          ctx.fill();
-
-          ctx.fillStyle = '#111111';
-          ctx.beginPath();
-          ctx.arc(ex + lookDx * 0.5, ey + lookDy * 0.5, r * 0.34, 0, TAU);
-          ctx.fill();
-
-          ctx.fillStyle = '#ffffff';
-          ctx.beginPath();
-          ctx.arc(ex + 1.2, ey - 1.2, 1.2, 0, TAU);
-          ctx.fill();
-        };
-        drawShockEye(eyeFarX, eyeY, eyeFarR + 0.6, farEyeColor);
-        drawShockEye(eyeNearX, eyeY, eyeNearR + 0.6, nearEyeColor);
-      } else {
-        // --- 表情D: 常态灵动双眼 (3/4 透视微缩 + 水润双高光 + 视线随动) ---
-        const drawChibiEye = (ex, ey, rx, ry, col) => {
-          ctx.save();
-          ctx.translate(ex, ey);
-          ctx.scale(1, blinkScaleY);
-
-          // 1. 虹膜底盘
-          ctx.fillStyle = col;
-          ctx.beginPath();
-          ctx.ellipse(0, 0, rx, ry, 0, 0, TAU);
-          ctx.fill();
-
-          // 2. 瞳孔黑核 (附带注视方向微偏移)
-          ctx.fillStyle = '#1e272e';
-          ctx.beginPath();
-          ctx.ellipse(lookDx, lookDy, rx * 0.66, ry * 0.72, 0, 0, TAU);
-          ctx.fill();
-
-          // 3. 晶莹水润双高光 (主反光 + 次漫反射点)
-          ctx.fillStyle = '#ffffff';
-          ctx.beginPath();
-          ctx.arc(lookDx + rx * 0.28, lookDy - ry * 0.3, rx * 0.32, 0, TAU);
-          ctx.arc(lookDx - rx * 0.24, lookDy + ry * 0.24, rx * 0.17, 0, TAU);
-          ctx.fill();
-
-          ctx.restore();
-        };
-
-        drawChibiEye(eyeFarX, eyeY, 3.4, eyeFarR, farEyeColor);
-        drawChibiEye(eyeNearX, eyeY, 4.4, eyeNearR, nearEyeColor);
+        }
       }
 
-      // 5. 小粉鼻与软糯 `:3` 猫嘴
-      ctx.fillStyle = breed.noseColor || '#dd7676';
+      const gaze = (portrait || options.eyeTracking === false) ? 0 : (this._smooth?.gazeX || 0) * .05;
+      const blink = portrait ? 0 : this._blinkAmt || 0;
+      const smiling = resting || (!portrait && this.purrLevel > .7);
+      const annoyed = !portrait && (this.state === 'bridge_duel' || this.state === 'belly_trap');
+      for (const x of MOCHI_EYES) {
+        const ry = (grabbed ? .25 : .22) * (1 - blink * .82);
+        ctx.beginPath();
+        if (smiling || annoyed || blink > .8) {
+          ctx.strokeStyle = '#392c29';
+          ctx.lineWidth = .066;
+          ctx.lineCap = 'round';
+          ctx.moveTo(x - .125, MOCHI_FACE_Y);
+          ctx.quadraticCurveTo(x, MOCHI_FACE_Y + (annoyed ? .045 : -.16), x + .125, MOCHI_FACE_Y);
+          ctx.stroke();
+          continue;
+        }
+        ctx.fillStyle = '#352b2a';
+        ctx.ellipse(x, MOCHI_FACE_Y, .178, ry, -.06, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = x > 0 ? breed.eyeRightColor || breed.eyeColor : breed.eyeColor;
+        ctx.beginPath();
+        ctx.ellipse(x + gaze * .3, MOCHI_FACE_Y + ry * .21, .135, ry * .68, 0, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = '#302728';
+        ctx.beginPath();
+        ctx.ellipse(x + gaze, MOCHI_FACE_Y, .118, ry * .76, 0, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = '#fff8eb';
+        ctx.beginPath();
+        ctx.arc(x + gaze - .048, MOCHI_FACE_Y - ry * .39, .060, 0, TAU);
+        ctx.moveTo(x + gaze + .09, MOCHI_FACE_Y + ry * .44);
+        ctx.arc(x + gaze + .062, MOCHI_FACE_Y + ry * .44, .028, 0, TAU);
+        ctx.fill();
+      }
+
+      ctx.fillStyle = breed.noseColor;
       ctx.beginPath();
-      ctx.arc(R * 0.68, -R * 0.66 + bounceY, 2.2, 0, TAU);
+      ctx.ellipse(.06, -.64, .083, .052, 0, 0, TAU);
       ctx.fill();
 
-      ctx.strokeStyle = '#2d3436';
-      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = '#5e4740';
+      ctx.lineWidth = .039;
       ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.arc(R * 0.62, -R * 0.52 + bounceY, 2.6, 0, Math.PI * 0.9);
+      ctx.moveTo(.06, -.60);
+      ctx.lineTo(.06, -.54);
+      ctx.quadraticCurveTo(-.025, -.445, -.119, -.53);
+      ctx.moveTo(.06, -.54);
+      ctx.quadraticCurveTo(.15, -.445, .24, -.53);
       ctx.stroke();
 
-      // 6. 极简两根细胡须
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
-      ctx.lineWidth = 1.0;
+      ctx.strokeStyle = breed.id === 'white' ? '#958d8d' : 'rgba(255, 250, 230, .84)';
+      ctx.lineWidth = .031;
       ctx.beginPath();
-      ctx.moveTo(R * 0.68, -R * 0.62 + bounceY);
-      ctx.lineTo(R * 1.15, -R * 0.72 + bounceY);
-      ctx.moveTo(R * 0.68, -R * 0.54 + bounceY);
-      ctx.lineTo(R * 1.12, -R * 0.44 + bounceY);
+      for (const side of MOCHI_WHISKERS) {
+        ctx.moveTo(.03 + side * .64, -.65);
+        ctx.quadraticCurveTo(.03 + side * .87, -.67, .03 + side * 1.08, -.61);
+        ctx.moveTo(.03 + side * .63, -.56);
+        ctx.lineTo(.03 + side * 1.04, -.51);
+      }
       ctx.stroke();
 
-      // 7. 佩戴帽子与服饰
       if (this.hat && this.hat !== 'none') {
-        this.drawHat(ctx, -R * 1.4 + bounceY, R * 0.75);
+        ctx.scale(1 / r, 1 / r);
+        this.drawHat(ctx, -r * 1.53, r * .73);
       }
+      ctx.restore();
 
-      // 8. 文字、名字标签与气泡 (保证即使镜像也是正立的)
-      // 若开启 options.suppressIndividualLabels，则交给 LabelClusterEngine 统一集中聚类渲染，避免重叠
       if (!options.suppressIndividualLabels) {
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-        const textHeadY = -R * 1.6 + bounceY;
+        const labelY = -r * 2.15;
         this._drawUprightText(ctx, () => {
-          ctx.fillText(this.name, 0, textHeadY - 8);
+          ctx.fillStyle = '#34473a';
+          ctx.font = 'bold 10px "Segoe UI", sans-serif';
+          ctx.fillText(this.name, 0, labelY);
         });
-
-        if (this.bubbleTimer > 0 && this.bubbleText) {
-          this.drawSpeechBubble(ctx, textHeadY - 14);
-        }
-        if (this.intentIcon) {
-          this.drawIntentBadge(ctx, textHeadY - (this.bubbleTimer > 0 ? 40 : 18));
-        }
+        if (this.bubbleTimer > 0 && this.bubbleText) this.drawSpeechBubble(ctx, labelY - 8);
+        else if (this.intentIcon) this.drawIntentBadge(ctx, labelY - 8);
       }
-
       ctx.restore();
     }
 
