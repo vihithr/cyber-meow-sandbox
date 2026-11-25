@@ -1591,7 +1591,8 @@
     }
 
     // 动态天气粒子层：微尘/雨滴每帧位置都会变，单独绘制以免被静态背景缓存冻结。
-    drawWeatherParticles(ctx, width, height) {
+    // 按视口范围裁剪、粒子预算限流并按透明度分桶合批，将 60 次 fill() 压减至 <=3 次。
+    drawWeatherParticles(ctx, width, height, options = {}) {
       ctx.save();
 
       // 飘浮微尘 / 萤火虫：阴影状态按天气设置一次，避免逐粒子切换昂贵状态
@@ -1605,14 +1606,38 @@
       } else {
         ctx.shadowBlur = 0;
       }
-      this.dustParticles.forEach(p => {
+
+      const minX = Number.isFinite(options.minX) ? options.minX : -Infinity;
+      const maxX = Number.isFinite(options.maxX) ? options.maxX : Infinity;
+      const budget = Number.isFinite(options.particleBudget) ? options.particleBudget : 240;
+      const maxDust = Math.min(this.dustParticles.length, Math.max(8, Math.round(budget * 0.6)));
+      const buckets = this._dustBuckets || (this._dustBuckets = [[], [], []]);
+      buckets[0].length = 0;
+      buckets[1].length = 0;
+      buckets[2].length = 0;
+
+      for (let i = 0; i < maxDust; i++) {
+        const p = this.dustParticles[i];
+        if (p.x + p.radius < minX || p.x - p.radius > maxX) continue;
+        const idx = p.alpha < 0.22 ? 0 : (p.alpha < 0.36 ? 1 : 2);
+        buckets[idx].push(p);
+      }
+
+      const bucketAlphas = isFirefly
+        ? ['rgba(241, 196, 15, 0.24)', 'rgba(241, 196, 15, 0.44)', 'rgba(241, 196, 15, 0.68)']
+        : ['rgba(255, 255, 255, 0.06)', 'rgba(255, 255, 255, 0.12)', 'rgba(255, 255, 255, 0.19)'];
+      for (let b = 0; b < 3; b++) {
+        const list = buckets[b];
+        if (list.length === 0) continue;
+        ctx.fillStyle = bucketAlphas[b];
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-        ctx.fillStyle = isFirefly
-          ? `rgba(241, 196, 15, ${p.alpha * 1.5})`
-          : `rgba(255, 255, 255, ${p.alpha * 0.4})`;
+        for (let i = 0; i < list.length; i++) {
+          const p = list[i];
+          ctx.moveTo(p.x + p.radius, p.y);
+          ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        }
         ctx.fill();
-      });
+      }
       ctx.shadowBlur = 0;
 
       // 雨丝
@@ -1620,10 +1645,13 @@
         ctx.strokeStyle = 'rgba(116, 185, 255, 0.45)';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        this.rainDrops.forEach(r => {
+        const maxRain = Math.min(this.rainDrops.length, Math.max(12, budget));
+        for (let i = 0; i < maxRain; i++) {
+          const r = this.rainDrops[i];
+          if (r.x < minX || r.x - 4 > maxX) continue;
           ctx.moveTo(r.x, r.y);
           ctx.lineTo(r.x - 3, r.y + r.len);
-        });
+        }
         ctx.stroke();
       }
 

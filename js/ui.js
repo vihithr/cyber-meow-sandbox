@@ -256,6 +256,16 @@
       if (!app || !app.renderEngineConfig) return;
       const cfg = app.renderEngineConfig;
 
+      // 预设按钮高亮同步 (匹配三大标准预设，自定义参数时不选中预设)
+      const matchedPreset =
+        (cfg.pipeline === 'chibi_cached' && cfg.clusterMode === 'minimal' && cfg.spriteCache && !cfg.eyeTracking) ? 'saver'
+        : (cfg.pipeline === 'procedural' && cfg.clusterMode === 'full' && !cfg.spriteCache && cfg.eyeTracking) ? 'ultra'
+        : (cfg.pipeline === 'chibi' && cfg.clusterMode === 'smart' && cfg.spriteCache && cfg.eyeTracking) ? 'balanced'
+        : null;
+      document.querySelectorAll('.preset-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.preset === matchedPreset);
+      });
+
       // 管线按钮状态
       document.querySelectorAll('#tuner-pipeline-group .tuner-opt-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.val === cfg.pipeline);
@@ -1101,6 +1111,12 @@
       let gazeY = 0;
       const startedAt = performance.now();
 
+      // 预建侍奉台脚底接触阴影渐变，避免每帧重新分配 RadialGradient
+      const contactShadow = ctx.createRadialGradient(198, footY - 1, 4, 198, footY - 1, 112);
+      contactShadow.addColorStop(0, 'rgba(48, 31, 24, .34)');
+      contactShadow.addColorStop(.42, 'rgba(55, 36, 27, .18)');
+      contactShadow.addColorStop(1, 'rgba(55, 36, 27, 0)');
+
       const render = () => {
         if (!this.studioCat) return;
         ctx.clearRect(0, 0, logicalWidth, logicalHeight);
@@ -1111,10 +1127,6 @@
         }
 
         // 图片背景的坐垫已包含体积，这里只统一压住脚底接触关系。
-        const contactShadow = ctx.createRadialGradient(198, footY - 1, 4, 198, footY - 1, 112);
-        contactShadow.addColorStop(0, 'rgba(48, 31, 24, .34)');
-        contactShadow.addColorStop(.42, 'rgba(55, 36, 27, .18)');
-        contactShadow.addColorStop(1, 'rgba(55, 36, 27, 0)');
         ctx.fillStyle = contactShadow;
         ctx.beginPath();
         ctx.ellipse(198, footY - 1, 112, 12, 0, 0, Math.PI * 2);
@@ -1181,18 +1193,23 @@
     constructor() {
       this.hoveredCluster = null;
       this.clusters = [];
+      this._visibleCats = [];
+      this._sortedCats = [];
+      this._placedBoxes = [];
     }
 
     /**
      * 对视口内的猫咪执行空间连通分量距离聚类
      */
     clusterCats(cats, viewport, threshold = 75) {
-      const visibleCats = [];
+      const visibleCats = this._visibleCats;
+      visibleCats.length = 0;
       const { cameraX, zoom, width } = viewport;
       const minX = cameraX - 80;
       const maxX = cameraX + width / zoom + 80;
 
-      for (let c of cats) {
+      for (let i = 0; i < cats.length; i++) {
+        const c = cats[i];
         if (c.x >= minX && c.x <= maxX) {
           visibleCats.push(c);
         }
@@ -1201,7 +1218,7 @@
       const n = visibleCats.length;
       if (n === 0) {
         this.clusters = [];
-        return { clusters: [], singletons: [] };
+        return { clusters: [], singletons: [], visibleCats };
       }
 
       // 并查集
@@ -1238,10 +1255,11 @@
         if (members.length > 1) {
           let sumX = 0;
           let minY = Infinity;
-          members.forEach(m => {
+          for (let i = 0; i < members.length; i++) {
+            const m = members[i];
             sumX += m.x;
             minY = Math.min(minY, (m.visualFootY ?? m.y) - (m.radius || 22) * 2.25);
-          });
+          }
           clusters.push({
             id: `cluster_${root}`,
             cats: members,
@@ -1255,7 +1273,7 @@
       }
 
       this.clusters = clusters;
-      return { clusters, singletons };
+      return { clusters, singletons, visibleCats };
     }
 
     /**
@@ -1263,28 +1281,41 @@
      */
     renderLabels(ctx, cats, viewport, config = {}, mouseWorld = null) {
       const mode = config.clusterMode || 'smart'; // 'smart' | 'minimal' | 'full'
-      const { clusters, singletons } = this.clusterCats(cats, viewport);
+      const { clusters, singletons, visibleCats } = this.clusterCats(cats, viewport);
 
       ctx.save();
 
       // 1. 渲染团簇折叠胶囊 (Cat Clump Capsule)
       if (mode !== 'full') {
-        for (let cl of clusters) {
+        for (let i = 0; i < clusters.length; i++) {
+          const cl = clusters[i];
           const isHovered = mouseWorld && Math.hypot(mouseWorld.x - cl.cx, mouseWorld.y - cl.cy) < 45;
           this._drawClusterCapsule(ctx, cl, isHovered, mode);
         }
       }
 
-      // 2. 渲染单猫或全量展开标签 (带相邻 Y 轴防遮挡避让)
-      const targetCats = (mode === 'full') ? cats : singletons;
-      const sorted = [...targetCats].sort((a, b) => a.x - b.x);
+      // 2. 渲染单猫或全量视口展开标签 (带多级 Y 轴防遮挡避让，跳过视口外实体)
+      const targetCats = (mode === 'full') ? visibleCats : singletons;
+      const sorted = this._sortedCats;
+      sorted.length = targetCats.length;
+      for (let i = 0; i < targetCats.length; i++) sorted[i] = targetCats[i];
+      if (sorted.length > 1) sorted.sort((a, b) => a.x - b.x);
+
+      const placed = this._placedBoxes;
+      placed.length = 0;
 
       for (let i = 0; i < sorted.length; i++) {
         const cat = sorted[i];
+        const baseTopY = (cat.visualFootY ?? cat.y) - (cat.radius || 22) * 2.2;
         let yOffset = 0;
-        if (i > 0 && Math.abs(cat.x - sorted[i - 1].x) < 48) {
-          yOffset = -14; // 相邻猫咪 Y 轴梯级错开避让
+        for (let p = placed.length - 1; p >= 0; p--) {
+          const box = placed[p];
+          if (Math.abs(cat.x - box.x) > 58) break;
+          if (Math.abs((baseTopY + yOffset) - box.y) < 16) {
+            yOffset -= 16;
+          }
         }
+        placed.push({ x: cat.x, y: baseTopY + yOffset });
 
         const isHovered = mouseWorld && Math.hypot(mouseWorld.x - cat.x, mouseWorld.y - ((cat.visualFootY ?? cat.y) - 30)) < 36;
         const isFocus = (cat.isGrabbed || isHovered || cat === config.catCam);
@@ -1297,8 +1328,11 @@
 
     _drawClusterCapsule(ctx, cluster, isHovered, mode) {
       const { cx, cy, cats, count } = cluster;
-      const names = cats.map(c => c.name).join('·');
-      const label = isHovered ? names : `${count} 只猫`;
+      let label = `${count} 只猫`;
+      if (isHovered) {
+        const shown = cats.slice(0, 3).map(c => c.name).join('·');
+        label = cats.length > 3 ? `${shown} +${cats.length - 3}` : shown;
+      }
 
       ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
       const textW = ctx.measureText(label).width;

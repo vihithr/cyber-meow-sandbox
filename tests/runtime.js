@@ -867,6 +867,56 @@ function registerRuntimeTests(options) {
     assert.strictEqual(mgr.config.clusterMode, 'smart', '平衡预设折叠异常');
     assert.strictEqual(mgr.config.spriteCache, true, '平衡预设 Sprite 缓存应开启');
   });
+
+  test('优化回归：粒子预算、全量视口标签裁剪、极速缓存与真实命中率遥测', () => {
+    const savedParticles = app.particles;
+    const savedConfig = { ...app.renderEngineConfig };
+    const savedTick = app._telemetryTick;
+    try {
+      // 1. particleBudget 限制生效
+      app.renderEngineConfig.particleBudget = 24;
+      app.particles = [];
+      for (let i = 0; i < 40; i++) app.spawnParticle(200, 200, '✨');
+      assert.strictEqual(app.particles.length, 24, 'particleBudget 未限制粒子数量');
+
+      // 2. LabelClusterEngine full 模式不应绘制视口外猫咪标签
+      const engine = sandbox.CyberMeow.LabelClusterEngine;
+      const Cat = sandbox.CyberMeow.Cat;
+      const inCat = new Cat(200, 400, { name: '视口内' });
+      const outCat = new Cat(2900, 400, { name: '视口外' });
+      const ctx = mock.document.createElement('canvas').getContext('2d');
+      const drawnNames = [];
+      const origFillText = ctx.fillText;
+      ctx.fillText = function (text, ...rest) {
+        drawnNames.push(text);
+        return origFillText.call(this, text, ...rest);
+      };
+      engine.renderLabels(ctx, [inCat, outCat], { cameraX: 0, zoom: 1, width: 1000, height: 1080 }, { clusterMode: 'full' });
+      assert.ok(drawnNames.includes('视口内'), 'full 模式漏绘视口内猫咪标签');
+      assert.ok(!drawnNames.includes('视口外'), 'full 模式仍绘制了视口外猫咪标签');
+
+      // 3. chibi_cached (fastBatch) 比 chibi 显著减少 pathOps
+      const testCat = new Cat(300, 400, { breed: sandbox.CyberMeow.BREEDS[0] });
+      const beforeChibi = mock.counters.pathOps;
+      testCat.renderChibiLoaf(ctx, 1920, 1080, { useSpriteCache: true, suppressIndividualLabels: true });
+      const chibiOps = mock.counters.pathOps - beforeChibi;
+      const beforeFast = mock.counters.pathOps;
+      testCat.renderChibiLoaf(ctx, 1920, 1080, { useSpriteCache: true, fastBatch: true, suppressIndividualLabels: true });
+      const fastOps = mock.counters.pathOps - beforeFast;
+      assert.ok(fastOps < chibiOps, `chibi_cached fastBatch 未降低路径开销: fast=${fastOps}, chibi=${chibiOps}`);
+
+      // 4. 遥测更新同步 renderEngineManager.telemetry 与 cacheHitRate
+      app._telemetryTick = 11;
+      app.loop();
+      const mgr = sandbox.CyberMeow.renderEngineManager;
+      assert.ok(/^\d+%$/.test(mgr.telemetry.cacheHitRate), `cacheHitRate 格式异常: ${mgr.telemetry.cacheHitRate}`);
+      assert.strictEqual(mock.document.getElementById('tuner-cache-hit').innerText, mgr.telemetry.cacheHitRate);
+    } finally {
+      app.particles = savedParticles;
+      Object.assign(app.renderEngineConfig, savedConfig);
+      app._telemetryTick = savedTick;
+    }
+  });
 }
 
 module.exports = { registerRuntimeTests };

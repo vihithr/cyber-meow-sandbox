@@ -88,16 +88,13 @@
       ctx.save();
       ctx.translate(this.x, this.y);
 
-      // 三角支撑架
+      // 三角支撑架 (合并双侧支撑为单次填充路径)
       ctx.fillStyle = '#8b5a2b';
       ctx.beginPath();
       ctx.moveTo(-this.w * 0.35, this.h);
       ctx.lineTo(-this.w * 0.35, this.h + 24);
       ctx.lineTo(-this.w * 0.15, this.h);
       ctx.closePath();
-      ctx.fill();
-
-      ctx.beginPath();
       ctx.moveTo(this.w * 0.35, this.h);
       ctx.lineTo(this.w * 0.35, this.h + 24);
       ctx.lineTo(this.w * 0.15, this.h);
@@ -473,10 +470,7 @@
       }
     }
 
-    draw(ctx) {
-      ctx.save();
-      ctx.translate(this.x, this.y);
-
+    _drawStaticBody(ctx) {
       // 底座
       ctx.fillStyle = '#d2b48c';
       ctx.fillRect(-this.width / 2, -18, this.width, 18);
@@ -496,15 +490,15 @@
       }
       ctx.fillStyle = this._postGrad;
       ctx.fillRect(-12, postTop, 24, -postTop - 18);
-      // 交错绳纹
+      // 交错绳纹：合并整柱所有麻绳弧线为单次 stroke，减少 40+ 次独立绘制
       ctx.strokeStyle = 'rgba(160, 130, 90, 0.55)';
       ctx.lineWidth = 1;
+      ctx.beginPath();
       for (let py = postTop; py < -18; py += 8) {
-        ctx.beginPath();
         ctx.moveTo(-12, py);
         ctx.bezierCurveTo(-5, py + 3, 5, py + 4, 12, py + 2);
-        ctx.stroke();
       }
+      ctx.stroke();
       // 顶/底金属箍，增加材质层次
       ctx.fillStyle = '#9b7b52';
       ctx.fillRect(-13, postTop, 26, 5);
@@ -518,11 +512,52 @@
         drawUpholsteredShelf(ctx, tier.xOffset, tier.yOffset, tier.w, tier.h);
       }
 
-      // 吊球
+      // 吊球固定悬臂
       const anchorX = 40;
-      const anchorY = this.tiers[1].yOffset + 80;
       ctx.fillStyle = '#876a48';
       ctx.fillRect(anchorX - 2, this.tiers[1].yOffset + this.tiers[1].h, 4, 80 - this.tiers[1].h);
+    }
+
+    _ensureStaticSprite() {
+      if (typeof document === 'undefined') return null;
+      const postTop = this.postTop || this.tiers[1].yOffset;
+      const key = `${postTop}|${this.width}`;
+      if (this._staticSprite && this._staticSpriteKey === key) return this._staticSprite;
+
+      const originX = Math.ceil(this.width / 2) + 12;
+      const originY = Math.ceil(-postTop) + 16;
+      const w = originX * 2;
+      const h = originY + 12;
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const sctx = canvas.getContext('2d');
+      if (!sctx) return null;
+
+      sctx.save();
+      sctx.translate(originX, originY);
+      this._drawStaticBody(sctx);
+      sctx.restore();
+
+      this._staticSpriteKey = key;
+      this._staticSprite = { canvas, originX, originY, w, h };
+      return this._staticSprite;
+    }
+
+    draw(ctx) {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+
+      const sprite = typeof ctx.drawImage === 'function' ? this._ensureStaticSprite() : null;
+      if (sprite) {
+        ctx.drawImage(sprite.canvas, -sprite.originX, -sprite.originY, sprite.w, sprite.h);
+      } else {
+        this._drawStaticBody(ctx);
+      }
+
+      // 吊球 (动态摆动部分)
+      const anchorX = 40;
+      const anchorY = this.tiers[1].yOffset + 80;
       ctx.strokeStyle = '#f5cd79';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -564,12 +599,12 @@
 
       ctx.strokeStyle = 'rgba(0, 0, 0, 0.18)';
       ctx.lineWidth = 1;
+      ctx.beginPath();
       for (let px = -this.w / 2 + 4; px < this.w / 2; px += 4) {
-        ctx.beginPath();
         ctx.moveTo(px, -this.h);
         ctx.lineTo(px, 0);
-        ctx.stroke();
       }
+      ctx.stroke();
 
       ctx.restore();
     }
@@ -902,22 +937,27 @@
       ctx.quadraticCurveTo(this.x, this.y + 12 + this.dynamicSag, rightX, this.y + 6);
       ctx.stroke();
 
-      // 4. 垂直悬挂吊绳与实木桥板
+      // 4. 垂直悬挂吊绳（批量合并为单次 stroke）与实木桥板
       const plankW = (this.w / this.plankCount) * 0.88;
+      ctx.strokeStyle = '#dfcba4';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
       for (let i = 0; i < this.plankCount; i++) {
         const px = leftX + (i + 0.5) * (this.w / this.plankCount);
         const norm = (i + 0.5) / this.plankCount;
         const baseCurve = Math.sin(norm * Math.PI) * 4;
         const py = this.y + baseCurve + this.sags[i];
-
-        // 垂直吊绳
         const topRopeY = (this.y - 18) + (Math.sin(norm * Math.PI) * 8 + this.dynamicSag * 0.8);
-        ctx.strokeStyle = '#dfcba4';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
         ctx.moveTo(px, topRopeY);
         ctx.lineTo(px, py);
-        ctx.stroke();
+      }
+      ctx.stroke();
+
+      for (let i = 0; i < this.plankCount; i++) {
+        const px = leftX + (i + 0.5) * (this.w / this.plankCount);
+        const norm = (i + 0.5) / this.plankCount;
+        const baseCurve = Math.sin(norm * Math.PI) * 4;
+        const py = this.y + baseCurve + this.sags[i];
 
         // 独立实木板块
         ctx.save();

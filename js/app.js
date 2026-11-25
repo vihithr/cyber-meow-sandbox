@@ -92,6 +92,10 @@
       // 背景离屏层：视口切片缓存（只覆盖可见世界范围 + 余量），随主题/尺寸/DPR/相机越界失效。
       this._bgLayer = null;
       this._bgLayerKey = '';
+      this._cacheHits = 0;
+      this._cacheMisses = 0;
+      this._cacheStats = { hits: 0, misses: 0 };
+      this._lastCacheHitRate = '100%';
       // 静态家具层：保留旧接口供兼容与测试调用；主循环改为逐帧直接绘制，不再占用常驻显存。
       this._staticFurnitureLayer = null;
       this._staticFurnitureLayerKey = '';
@@ -245,7 +249,10 @@
     }
 
     spawnParticle(x, y, text) {
-      if (this.particles.length >= MAX_PARTICLES) this.particles.shift();
+      const budget = Number.isFinite(this.renderEngineConfig?.particleBudget)
+        ? this.renderEngineConfig.particleBudget : MAX_PARTICLES;
+      const limit = Math.min(MAX_PARTICLES, Math.max(10, budget));
+      while (this.particles.length >= limit) this.particles.shift();
       this.particles.push({
         x, y, text,
         vx: (Math.random() - 0.5) * 1.6,
@@ -1215,8 +1222,10 @@
       const cachedW = this._bgLayer ? (this._bgLayer._sliceWorldWidth || 0) : 0;
       if (this._bgLayer && key === this._bgLayerKey && wantRight > wantLeft &&
           wantLeft >= cachedLeft && wantRight <= cachedLeft + cachedW) {
+        this._cacheHits++;
         return;
       }
+      this._cacheMisses++;
       const sliceWidth = Math.max(1, wantRight - wantLeft);
       const layerScale = Math.min(this.dpr || 1, 1.25);
       const { layer, lctx } = this._ensureLayerSlot('_bgLayer', sliceWidth, this.height, layerScale);
@@ -1366,11 +1375,17 @@
 
       // 2. 背景与天气系统 (覆盖整座 3000px 豪宅世界)
       // 取舍：静态背景烘焙到「视口切片」离屏层，命中缓存时只 drawImage 一次；
-      //      天气粒子与飞鸟是动态层，逐帧单独绘制，不会被缓存冻结。
+      //      天气粒子与飞鸟是动态层，按视口区间裁剪与预算限流逐帧合批绘制。
+      const renderMgr = window.CyberMeow && window.CyberMeow.renderEngineManager;
+      const cfg = this.renderEngineConfig || (renderMgr ? renderMgr.config : null) || {};
       environment.update(worldWidth, height);
       this._ensureBgLayer();
       this._drawCachedLayer(ctx, this._bgLayer, this.sceneOffsetY / this.zoom);
-      environment.drawWeatherParticles(ctx, worldWidth, height);
+      environment.drawWeatherParticles(ctx, worldWidth, height, {
+        minX: this._visibleRange.left,
+        maxX: this._visibleRange.right,
+        particleBudget: cfg.particleBudget
+      });
 
       // 3. 阳光光束 (动态，始终绘制)
       if (this.sunbeam && environment.theme !== 'cyber_neon') {
@@ -1403,15 +1418,16 @@
       if (this.furniture.length > MAX_FURNITURE) this.furniture.splice(0, this.furniture.length - MAX_FURNITURE);
 
       // 6. 猫咪更新与绘制 (支持离屏 Sprite 缓存烘焙与双模 LOD)
-      const renderMgr = window.CyberMeow && window.CyberMeow.renderEngineManager;
-      const cfg = this.renderEngineConfig || (renderMgr ? renderMgr.config : null) || {};
       const pipe = cfg.pipeline || this.catRenderStyle || 'chibi';
       const actualStyle = (pipe === 'procedural') ? 'procedural' : 'chibi';
       this.catRenderStyle = actualStyle;
 
-      const useSpriteCache = (cfg.spriteCache !== false) && (pipe === 'chibi_cached' || pipe === 'chibi');
+      const fastBatch = (pipe === 'chibi_cached');
+      const useSpriteCache = (cfg.spriteCache !== false) && (fastBatch || pipe === 'chibi');
       const eyeTracking = (cfg.eyeTracking !== false);
       const clusterLabels = (cfg.clusterLabels !== false);
+      const frameNow = Date.now();
+      const cacheStats = this._cacheStats;
 
       let visibleCatsCount = 0;
       for (let c of this.cats) {
@@ -1422,7 +1438,10 @@
             style: this.catRenderStyle,
             suppressIndividualLabels: clusterLabels,
             useSpriteCache: useSpriteCache,
-            eyeTracking: eyeTracking
+            fastBatch: fastBatch,
+            eyeTracking: eyeTracking,
+            now: frameNow,
+            cacheStats: cacheStats
           });
         }
       }
@@ -1514,6 +1533,29 @@
 
       const fps = Math.round(1000 / Math.max(1, this._frameEma || 16.7));
       const ms = (this._frameEma || 16.7).toFixed(1);
+      const totalHits = this._cacheHits + (this._cacheStats?.hits || 0);
+      const totalMisses = this._cacheMisses + (this._cacheStats?.misses || 0);
+      const totalLookups = totalHits + totalMisses;
+      const hitRate = totalLookups > 0
+        ? `${Math.round((totalHits / totalLookups) * 100)}%`
+        : this._lastCacheHitRate;
+      this._lastCacheHitRate = hitRate;
+      this._cacheHits = 0;
+      this._cacheMisses = 0;
+      if (this._cacheStats) {
+        this._cacheStats.hits = 0;
+        this._cacheStats.misses = 0;
+      }
+
+      const renderMgr = window.CyberMeow && window.CyberMeow.renderEngineManager;
+      if (renderMgr && renderMgr.telemetry) {
+        renderMgr.telemetry.fps = fps;
+        renderMgr.telemetry.frameMs = Number(ms);
+        renderMgr.telemetry.activeClusters = clusterCount;
+        renderMgr.telemetry.visibleCats = visibleCatsCount;
+        renderMgr.telemetry.cacheHitRate = hitRate;
+        renderMgr.telemetry.culledEntities = culled;
+      }
 
       // 同步模态框内数据
       const elFps = document.getElementById('tuner-fps');
@@ -1524,6 +1566,8 @@
       if (elClusters) elClusters.innerText = `${clusterCount} 个`;
       const elVis = document.getElementById('tuner-visible-cats');
       if (elVis) elVis.innerText = `${visibleCatsCount} 只`;
+      const elHit = document.getElementById('tuner-cache-hit');
+      if (elHit) elHit.innerText = hitRate;
       const elCulled = document.getElementById('tuner-culled');
       if (elCulled) elCulled.innerText = `${culled}`;
 

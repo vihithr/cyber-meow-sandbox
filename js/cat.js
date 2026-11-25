@@ -302,12 +302,13 @@
     }
   };
 
-  function mochiPose(cat) {
+  function mochiPose(cat, nowMs) {
     const brisk = Math.abs(cat.vx || 0) > .55;
     const phase = (cat.walkCycle || 0) * 1.5;
     const resting = cat.state === 'loaf' || cat.state === 'sleeping';
     const airborne = ['jumping', 'pouncing', 'aerial_pounce_drop'].includes(cat.state);
-    const wobble = Math.sin(brisk ? phase * 2 : Date.now() * .004 + (cat.x || 0) * .06);
+    const now = nowMs || Date.now();
+    const wobble = Math.sin(brisk ? phase * 2 : now * .004 + (cat.x || 0) * .06);
     const spring = cat._mochiLanding || 0;
     let sx = 1 + wobble * (brisk ? .04 : .018) + spring * .14;
     let sy = 1 - wobble * (brisk ? .055 : .022) - spring * .18;
@@ -325,7 +326,7 @@
       sx *= 1.12;
       sy *= resting ? .78 : .83;
     }
-    return { sx, sy, angle, phase, resting, brisk, airborne };
+    return { sx, sy, angle, phase, resting, brisk, airborne, now };
   }
 
   function calcJumpArc(rise, fallOffset = 1) {
@@ -3680,10 +3681,11 @@
     renderChibiLoaf(ctx, width, height, options = {}) {
       const { breed } = this;
       const portrait = options.portrait;
+      const fastBatch = !!options.fastBatch && !portrait;
       const r = portrait ? width * .28 : this.radius;
-      const { sx, sy, angle, phase, resting, brisk, airborne } = portrait
-        ? { sx: 1, sy: 1, angle: 0, phase: 0, resting: false, brisk: false, airborne: false }
-        : mochiPose(this);
+      const { sx, sy, angle, phase, resting, brisk, airborne, now } = portrait
+        ? { sx: 1, sy: 1, angle: 0, phase: 0, resting: false, brisk: false, airborne: false, now: 0 }
+        : mochiPose(this, options.now);
       const boxed = !portrait && this.inBox;
       const grabbed = !portrait && this.isGrabbed;
       ctx.save();
@@ -3702,7 +3704,7 @@
       ctx.save();
       ctx.scale(r, r);
 
-      if (!portrait && !grabbed && !airborne && !boxed && this.state !== 'climbing') {
+      if (!portrait && !fastBatch && !grabbed && !airborne && !boxed && this.state !== 'climbing') {
         ctx.fillStyle = 'rgba(57, 41, 33, .16)';
         ctx.beginPath();
         ctx.ellipse(0, 0, .96, .12, 0, 0, TAU);
@@ -3713,21 +3715,28 @@
       ctx.scale(sx, sy);
 
       if (!boxed) {
-        const wave = portrait ? .02 : Math.sin(Date.now() * .007 + this.x * .08) * .12;
+        const wave = portrait ? .02 : Math.sin(now * .007 + this.x * .08) * .12;
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(-.8, -.49);
         ctx.bezierCurveTo(-1.18, -.43, -1.53 - wave, -.62, -1.46 + wave, -.91 - wave);
-        ctx.strokeStyle = MOCHI_INK;
-        ctx.lineWidth = .26;
-        ctx.stroke();
+        if (!fastBatch) {
+          ctx.strokeStyle = MOCHI_INK;
+          ctx.lineWidth = .26;
+          ctx.stroke();
+        }
         ctx.strokeStyle = breed.isPointColor ? breed.pointColor : breed.bodyColor;
         ctx.lineWidth = .18;
         ctx.stroke();
       }
 
-      const baked = options.useSpriteCache ? ChibiBakeCache.get(breed.id) : null;
-      if (baked?.breed === breed && typeof ctx.drawImage === 'function') {
+      const baked = (options.useSpriteCache || fastBatch) ? ChibiBakeCache.get(breed.id) : null;
+      const cacheHit = !!(baked?.breed === breed && typeof ctx.drawImage === 'function');
+      if (options.cacheStats) {
+        if (cacheHit) options.cacheStats.hits++;
+        else options.cacheStats.misses++;
+      }
+      if (cacheHit) {
         const size = baked.size / baked.r;
         ctx.drawImage(baked.canvas, -baked.origin.x / baked.r, -baked.origin.y / baked.r, size, size);
       } else {
@@ -3736,50 +3745,66 @@
 
       if (!boxed) {
         ctx.fillStyle = breed.isPointColor ? breed.pointColor : (breed.socks ? breed.bellyColor : breed.lightColor);
-        ctx.strokeStyle = MOCHI_INK;
-        ctx.lineWidth = .038;
-        for (const paw of MOCHI_PAWS) {
-          const step = brisk ? Math.sin(phase + (paw < 0 ? 0 : Math.PI)) : 0;
-          const y = resting ? -.15 : -.11 - Math.max(0, step) * .07;
+        if (fastBatch) {
           ctx.beginPath();
-          ctx.ellipse(paw + step * .10, y, .22, .105, step * .15, 0, TAU);
+          for (const paw of MOCHI_PAWS) {
+            const step = brisk ? Math.sin(phase + (paw < 0 ? 0 : Math.PI)) : 0;
+            const y = resting ? -.15 : -.11 - Math.max(0, step) * .07;
+            ctx.moveTo(paw + step * .10 + .22, y);
+            ctx.ellipse(paw + step * .10, y, .22, .105, step * .15, 0, TAU);
+          }
           ctx.fill();
-          ctx.stroke();
+        } else {
+          ctx.strokeStyle = MOCHI_INK;
+          ctx.lineWidth = .038;
+          for (const paw of MOCHI_PAWS) {
+            const step = brisk ? Math.sin(phase + (paw < 0 ? 0 : Math.PI)) : 0;
+            const y = resting ? -.15 : -.11 - Math.max(0, step) * .07;
+            ctx.beginPath();
+            ctx.ellipse(paw + step * .10, y, .22, .105, step * .15, 0, TAU);
+            ctx.fill();
+            ctx.stroke();
+          }
         }
       }
 
-      const gaze = (portrait || options.eyeTracking === false) ? 0 : (this._smooth?.gazeX || 0) * .05;
+      const trackEyes = !portrait && options.eyeTracking !== false;
+      const gaze = trackEyes ? clamp(this._smooth?.gazeX || 0, -1, 1) * .05 : 0;
+      const gazeY = trackEyes ? clamp(this._smooth?.gazeY || 0, -1, 1) * .032 : 0;
       const blink = portrait ? 0 : this._blinkAmt || 0;
       const smiling = resting || (!portrait && this.purrLevel > .7);
       const annoyed = !portrait && (this.state === 'bridge_duel' || this.state === 'belly_trap');
       for (const x of MOCHI_EYES) {
         const ry = (grabbed ? .25 : .22) * (1 - blink * .82);
+        const eyeY = MOCHI_FACE_Y;
         ctx.beginPath();
         if (smiling || annoyed || blink > .8) {
           ctx.strokeStyle = '#392c29';
           ctx.lineWidth = .066;
           ctx.lineCap = 'round';
-          ctx.moveTo(x - .125, MOCHI_FACE_Y);
-          ctx.quadraticCurveTo(x, MOCHI_FACE_Y + (annoyed ? .045 : -.16), x + .125, MOCHI_FACE_Y);
+          ctx.moveTo(x - .125, eyeY);
+          ctx.quadraticCurveTo(x, eyeY + (annoyed ? .045 : -.16), x + .125, eyeY);
           ctx.stroke();
           continue;
         }
         ctx.fillStyle = '#352b2a';
-        ctx.ellipse(x, MOCHI_FACE_Y, .178, ry, -.06, 0, TAU);
+        ctx.ellipse(x, eyeY, .178, ry, -.06, 0, TAU);
         ctx.fill();
         ctx.fillStyle = x > 0 ? breed.eyeRightColor || breed.eyeColor : breed.eyeColor;
         ctx.beginPath();
-        ctx.ellipse(x + gaze * .3, MOCHI_FACE_Y + ry * .21, .135, ry * .68, 0, 0, TAU);
+        ctx.ellipse(x + gaze * .3, eyeY + ry * .21 + gazeY * .5, .135, ry * .68, 0, 0, TAU);
         ctx.fill();
         ctx.fillStyle = '#302728';
         ctx.beginPath();
-        ctx.ellipse(x + gaze, MOCHI_FACE_Y, .118, ry * .76, 0, 0, TAU);
+        ctx.ellipse(x + gaze, eyeY + gazeY, .118, ry * .76, 0, 0, TAU);
         ctx.fill();
         ctx.fillStyle = '#fff8eb';
         ctx.beginPath();
-        ctx.arc(x + gaze - .048, MOCHI_FACE_Y - ry * .39, .060, 0, TAU);
-        ctx.moveTo(x + gaze + .09, MOCHI_FACE_Y + ry * .44);
-        ctx.arc(x + gaze + .062, MOCHI_FACE_Y + ry * .44, .028, 0, TAU);
+        ctx.arc(x + gaze - .048, eyeY + gazeY - ry * .39, .060, 0, TAU);
+        if (!fastBatch) {
+          ctx.moveTo(x + gaze + .09, eyeY + gazeY + ry * .44);
+          ctx.arc(x + gaze + .062, eyeY + gazeY + ry * .44, .028, 0, TAU);
+        }
         ctx.fill();
       }
 
@@ -3799,16 +3824,18 @@
       ctx.quadraticCurveTo(.15, -.445, .24, -.53);
       ctx.stroke();
 
-      ctx.strokeStyle = breed.id === 'white' ? '#958d8d' : 'rgba(255, 250, 230, .84)';
-      ctx.lineWidth = .031;
-      ctx.beginPath();
-      for (const side of MOCHI_WHISKERS) {
-        ctx.moveTo(.03 + side * .64, -.65);
-        ctx.quadraticCurveTo(.03 + side * .87, -.67, .03 + side * 1.08, -.61);
-        ctx.moveTo(.03 + side * .63, -.56);
-        ctx.lineTo(.03 + side * 1.04, -.51);
+      if (!fastBatch) {
+        ctx.strokeStyle = breed.id === 'white' ? '#958d8d' : 'rgba(255, 250, 230, .84)';
+        ctx.lineWidth = .031;
+        ctx.beginPath();
+        for (const side of MOCHI_WHISKERS) {
+          ctx.moveTo(.03 + side * .64, -.65);
+          ctx.quadraticCurveTo(.03 + side * .87, -.67, .03 + side * 1.08, -.61);
+          ctx.moveTo(.03 + side * .63, -.56);
+          ctx.lineTo(.03 + side * 1.04, -.51);
+        }
+        ctx.stroke();
       }
-      ctx.stroke();
 
       if (this.hat && this.hat !== 'none') {
         ctx.scale(1 / r, 1 / r);

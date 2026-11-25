@@ -94,17 +94,18 @@
     draw(ctx) {
       ctx.save();
 
-      // 绘制散落在地上的毛线段
+      // 绘制散落在地上的毛线段 (单次批量 stroke)
       if (this.looseThreads.length > 0) {
         ctx.strokeStyle = this.color;
         ctx.lineWidth = 2;
         ctx.lineCap = 'round';
-        this.looseThreads.forEach(t => {
-          ctx.beginPath();
+        ctx.beginPath();
+        for (let i = 0; i < this.looseThreads.length; i++) {
+          const t = this.looseThreads[i];
           ctx.moveTo(t.x, t.y);
           ctx.quadraticCurveTo(t.x + t.w * 0.5, t.y + t.h, t.x + t.w, t.y);
-          ctx.stroke();
-        });
+        }
+        ctx.stroke();
       }
 
       // 运动毛线拖尾
@@ -130,25 +131,25 @@
       ctx.fillStyle = this.color;
       ctx.fill();
 
-      // Three winding directions follow the curve of the ball.
+      // Three winding directions follow the curve of the ball (batched per style).
       ctx.clip();
       const r = this.radius;
       ctx.strokeStyle = 'rgba(62,32,48,.28)';
       ctx.lineWidth = r * .15;
+      ctx.beginPath();
       for (let i = -3; i <= 3; i++) {
-        ctx.beginPath();
         ctx.moveTo(-r, i*r*.32-r*.5);
         ctx.quadraticCurveTo(0, i*r*.32+r*.5, r, i*r*.32+r*.35);
-        ctx.stroke();
       }
+      ctx.stroke();
       ctx.strokeStyle = 'rgba(255,241,212,.65)';
       ctx.lineWidth = r * .10;
+      ctx.beginPath();
       for (let i = 0; i < 4; i++) {
-        ctx.beginPath();
         ctx.moveTo(-r+i*r*.26, -r);
         ctx.quadraticCurveTo(-r*.74+i*r*.22, -r*.18, r*.45+i*r*.19, r*.35);
-        ctx.stroke();
       }
+      ctx.stroke();
 
       ctx.restore();
     }
